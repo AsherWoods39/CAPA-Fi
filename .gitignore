@@ -64,7 +64,3 @@ data/
 # Experiment Results & Generated Figures
 results/
 !results/.gitkeep
-src/adaptation/.gitkeep
-src/evaluation/.gitkeep
-src/models/.gitkeep
-src/utils/.gitkeep
