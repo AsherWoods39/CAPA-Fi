@@ -1,0 +1,115 @@
+# ==============================================================================
+# CAPA-Fi: Category-Aware Partial Adaptation Filtering for Wi-Fi Sensing
+# Default System Configuration & Hyperparameters
+# ==============================================================================
+
+# --- Global & Reproducibility Settings ---
+system:
+  seed: 42
+  device: "cuda"                  # "cuda" or "cpu"
+  num_workers: 4
+  pin_memory: true
+  cudnn_deterministic: true
+
+# --- Data Engine & Ingestion (Member 1: Abey John Pramod) ---
+data:
+  dataset_name: "WiMANS"          # Target benchmark dataset
+  raw_data_dir: "data/raw/WiMANS"
+  processed_dir: "data/processed/WiMANS"
+  lazy_loading: true              # Memory-mapped streaming (.npy)
+  max_memory_gb: 8.0              # Strict memory ceiling [4.0, 8.0] GB
+  
+  # CSI Dimensions & Sampling
+  window_size_T: 500              # Temporal time packets per sample window
+  subcarriers_S: 30               # OFDM subcarrier count (Intel 5300 format)
+  channels_C: 3                   # Number of antenna pairs / receiver channels
+  sampling_rate_hz: 1000          # CSI packet frequency in Hz
+
+  # Preprocessing Filters
+  enable_phase_sanitization: true # Linear phase unwrapping & conjugate multiplication
+  enable_dwt_denoising: true      # Discrete Wavelet Transform
+  dwt_wavelet: "sym4"             # Symlet-4 wavelet family
+  dwt_level: 3                    # Multi-resolution decomposition level
+  
+  # Domain Adaptation Protocols
+  source_domain: "Room_1_5GHz"    # Source training environment
+  target_domain: "Room_2_2.4GHz"  # Physical target test environment
+  
+  # Partial Domain Shift Configurations (Y_t subset of Y_s)
+  protocol: "partial_75"          # "closed_set", "partial_75", "partial_50"
+  source_classes: [1, 2, 3, 4, 5, 6] # 1:Walk, 2:Sit, 3:Stand, 4:Fall, 5:Wave, 6:Pick-up
+  target_classes_partial_75: [1, 2, 3, 4] # 75% overlap (classes 5, 6 absent)
+  target_classes_partial_50: [1, 2, 3]    # 50% overlap (classes 4, 5, 6 absent)
+  no_person_class_idx: 0          # Class 0: Unoccupied slot / "No-Person" background
+
+# --- Model Architecture (Member 2: Ashlin Joe) ---
+model:
+  max_users_M: 2                  # Number of concurrent user prediction slots
+  num_activity_classes_K: 6       # Active human activity categories
+  total_classes: 7                # K + 1 (includes Class 0: No-Person)
+  
+  # Feature Encoder Backbone f_θ
+  spatial_backbone: "CNN2D"       # Depthwise separable 2D spatial convolution
+  spatial_channels: [32, 64, 128]
+  temporal_encoder: "BiLSTM"      # "BiLSTM" or "TemporalTransformer"
+  temporal_hidden_dim: 128
+  temporal_layers: 2
+  latent_dim_D: 256               # Final feature representation dimension
+  dropout: 0.2
+
+  # Classifier Head g_θ (Frozen during adaptation)
+  classifier_type: "MultiSlotLinear"
+  
+  # Self-Supervised Auxiliary Head h_ψ
+  rotation_head: "BinaryRotationMLP"
+  rot_hidden_dim: 64
+
+# --- Source Domain Pre-Training (Member 2 & Member 3) ---
+source_training:
+  epochs: 50
+  batch_size: 32
+  learning_rate: 1.0e-3
+  weight_decay: 1.0e-4
+  optimizer: "AdamW"
+  scheduler: "CosineAnnealingLR"
+  matcher: "hungarian"            # Hungarian Bipartite Matcher for permutation invariance
+  checkpoint_path: "checkpoints/source_model.pt"
+
+# --- Target Adaptation Engine: CAPA-Fi (Member 3: Athishta P. A. - MY ROLE) ---
+adaptation:
+  method: "capa_fi"               # "source_only", "shot", "mu_shot_fi", "capa_fi"
+  freeze_classifier: true         # Strictly enforces requires_grad = False on g_θ
+  epochs: 30
+  batch_size: 32
+  learning_rate_backbone: 1.0e-4  # Target adaptation learning rate for f_θ
+  weight_decay: 1.0e-4
+  optimizer: "AdamW"
+
+  # Loss Formulation Hyperparameters
+  lambda_ent: 1.0                 # Conditional entropy weight
+  lambda_div: 1.0                 # Marginal diversity weight
+  lambda_rot: 0.5                 # 180° Rotation SSL auxiliary weight
+
+  # Multi-User Occupancy Gating
+  enable_occupancy_weighting: true # p_occ = 1 - p_no_person weighting on diversity
+
+  # Category-Aware Dynamic Filtering Mask (γ_k)
+  enable_category_filtering: true # Novel CAPA-Fi negative-transfer mitigation
+  tau_conf: 0.7                   # Confidence threshold for pseudo-evidence accumulation
+  tau_thresh: 0.08                # Marginal presence cutoff threshold
+  tau_temp: 0.04                  # Sigmoidal mask temperature parameter
+  ema_decay_beta: 0.9             # Exponential moving average smoothing factor
+
+# --- Evaluation & Benchmarking (Member 4: Fathima Bushara M. C.) ---
+evaluation:
+  metrics:
+    - "slot_wise_accuracy"
+    - "occupancy_mae"
+    - "macro_f1"
+    - "exact_match_ratio"
+  visualizations:
+    confusion_matrix: true
+    tsne_embeddings: true
+    loss_curves: true
+    latex_table_export: true
+  output_dir: "results/"
