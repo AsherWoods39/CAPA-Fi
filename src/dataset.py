@@ -16,7 +16,7 @@ class MultiUserCSIDataset(Dataset):
 
     def __getitem__(self, idx):
         row = self.annotations.iloc[idx]
-        sample_name = row['sample_label']
+        sample_name = row['label']
         
         file_path = os.path.join(self.data_dir, f"{sample_name}.npy")
         csi_tensor = np.load(file_path).astype(np.float32) # Shape: [Time, Tx, Rx, Subcarriers]
