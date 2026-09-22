@@ -154,19 +154,19 @@ python -m src.evaluation.benchmark --config configs/default_config.yaml --protoc
   - All 4 documentation deliverables finalized with formal mathematical proofs (Theorems 1, 2, 3) and theoretical grounding (SAN, CPC, Machine Unlearning).
   - Directory outlines initialized without `.py` files to preserve clean team module ownership.
 - [ ] **Milestone 1 (50% Target):**
-  - Member 1: Lazy streaming `WiMANSDataset` under 4–8 GB RAM ceiling.
+  - Member 1: Dataset preprocessing & cleaning pipeline (`src/dataset.py`). `[COMPLETED ✅]`
   - Member 2: Spatial-temporal backbone + $M$-slot head trained via Hungarian bipartite matching.
-  - Member 3: Target adaptation manager with frozen classifier $g_\theta$ and standard SHOT $\mathcal{L}_{\text{IM}}$.
+  - Member 3: Target adaptation manager with frozen classifier $g_\theta$ and standard SHOT $\mathcal{L}_{\text{IM}}$. `[COMPLETED ✅]`
   - Member 4: Zero-shot unadapted baseline evaluation suite.
 - [ ] **Milestone 2 (70% Target):**
-  - Member 1: Dual-band ($5\text{ GHz} \to 2.4\text{ GHz}$) splits, DWT filtering, phase sanitization, 180° rotation transforms.
+  - Member 1: DWT filtering and spatial-temporal tensor reshaping (`src/dataset.py`). `[COMPLETED ✅]`
   - Member 2: Auxiliary rotation head $h_\psi$ and permutation-invariance verification unit tests.
-  - Member 3: Full MU-SHOT-Fi engine ($\mathcal{L}_{\text{IM-multi}} + \mathcal{L}_{\text{rot}}$).
+  - Member 3: Full MU-SHOT-Fi engine ($\mathcal{L}_{\text{IM-multi}} + \mathcal{L}_{\text{rot}}$). `[COMPLETED ✅]`
   - Member 4: Benchmark replication and empirical demonstration of negative transfer under partial category shift.
 - [ ] **Milestone 3 (100% Target):**
   - Member 1: Partial domain shift configurations (Closed-set, Partial 75%, Partial 50%).
   - Member 2: Model export profiling (ONNX / Jetson latency) and latent feature visualizer hooks.
-  - Member 3: Category-Aware Dynamic Filtering Mask ($\gamma_k$) and confidence weighting ($w_i$) eliminating negative transfer.
+  - Member 3: Category-Aware Dynamic Filtering Mask ($\gamma_k$) and confidence weighting ($w_i$) eliminating negative transfer. `[COMPLETED ✅]`
   - Member 4: Publication visualizer generating confusion matrices, t-SNE embeddings, and automated LaTeX tables.
 
 ---
