@@ -78,12 +78,15 @@ class CategoryMaskEngine:
         mask_expanded = conf_mask.unsqueeze(-1).unsqueeze(-1)   # (B, 1, 1)
         # Weighted average per class: p_bar_k = Σ_{i,m} p_{i,m,k} * I(w_i >= tau) / Σ I(w_i >= tau)
         conf_slots = conf_mask.unsqueeze(-1).expand(B, M)  # (B, M)
-        dm = conf_slots.sum() + 1e-7
-        nm = (act_probs * mask_expanded).sum(dim=[0, 1])
-        p_bar = nm / dm # (K, )
-        # EMA update (detach from computation graph — this is a statistic, not a parameter)
-        with torch.no_grad():
-            self.mu.copy_(self.beta * self.mu + (1.0 - self.beta) * p_bar.detach().cpu())
+        conf_count = conf_slots.sum()
+        
+        # Only update running prevalence statistics if confident evidence exists in batch
+        if conf_count > 0:
+            nm = (act_probs * mask_expanded).sum(dim=[0, 1])
+            p_bar = nm / conf_count  # (K, )
+            with torch.no_grad():
+                self.mu.copy_(self.beta * self.mu + (1.0 - self.beta) * p_bar.detach().cpu())
+        
         # Sigmoid gating: smooth transition around tau_thresh
         mu_device = self.mu.to(probs.device)
         gamma_k = torch.sigmoid((mu_device - self.tau_thresh) / self.tau_temp)

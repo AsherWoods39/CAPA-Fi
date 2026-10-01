@@ -194,6 +194,59 @@ def test_trainer_adaptation_and_freezing():
     print("  [PASS] Trainer parameter freeze, optimization step, and checkpointing verified!")
 
 
+def test_multiepoch_adapt_and_engine_contract():
+    """Test full multi-epoch adapt() loop, telemetry export, and CAPAFiAdaptationEngine contract."""
+    print("--- 5. Testing Multi-Epoch adapt() & CAPAFiAdaptationEngine Contract ---")
+    from src.adaptation import CAPAFiAdaptationEngine
+    
+    model = MockHARModel(channels=3, latent_dim=256, slots=2, total_classes=7)
+    config = {
+        "learning_rate_backbone": 1.0e-4,
+        "weight_decay": 1.0e-4,
+        "lambda_ent": 1.0,
+        "lambda_div": 0.5,
+        "lambda_rot": 0.5,
+        "num_classes": 6,
+        "epochs": 3,
+        "tau_conf": 0.65,
+    }
+    
+    engine = CAPAFiAdaptationEngine(model=model, config=config)
+    assert engine.num_classes == 6
+    
+    # Test contract methods
+    dummy_probs = torch.softmax(torch.randn(8, 2, 7), dim=-1)
+    w_i = engine.compute_sample_confidence(dummy_probs)
+    assert w_i.shape == (8,)
+    gamma = engine.compute_category_mask(dummy_probs, w_i)
+    assert gamma.shape == (6,)
+    
+    # Run 3-epoch adapt with synthetic data
+    x_synth = torch.randn(8, 3, 500, 30)
+    loader = DataLoader(TensorDataset(x_synth), batch_size=4)
+    
+    results_path = REPO_ROOT / "results" / "test_history.json"
+    ckpt_path = REPO_ROOT / "checkpoints" / "test_adapted_multi.pt"
+    
+    history = engine.adapt(
+        target_loader=loader,
+        epochs=3,
+        save_path=str(ckpt_path),
+        results_path=str(results_path),
+        verbose=False
+    )
+    
+    assert len(history["epoch"]) == 3
+    assert len(history["loss_total"]) == 3
+    assert results_path.exists(), "Telemetry JSON was not saved!"
+    assert ckpt_path.exists(), "Model checkpoint was not saved!"
+    
+    # Cleanup test files
+    results_path.unlink()
+    ckpt_path.unlink()
+    print("  [PASS] Multi-epoch adaptation, JSON telemetry, and contract methods verified!")
+
+
 if __name__ == "__main__":
     print("==================================================")
     print("   RUNNING CAPA-Fi MODULE 3 STANDALONE TESTS      ")
@@ -202,6 +255,7 @@ if __name__ == "__main__":
     test_absent_class_gradient_cutoff()
     test_loss_engine()
     test_trainer_adaptation_and_freezing()
+    test_multiepoch_adapt_and_engine_contract()
     print("==================================================")
-    print("   ALL TESTS PASSED! MODULE 3 IS 70% READY!       ")
+    print("   ALL TESTS PASSED! MODULE 3 IS 100% READY!      ")
     print("==================================================")

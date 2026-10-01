@@ -16,7 +16,11 @@ from src.adaptation.loss_engine import (
     compute_masked_diversity_loss,
     compute_rotation_loss,
 )
-from src.adaptation.trainer import TargetAdaptationTrainer
+from src.adaptation.trainer import (
+    CAPAFiAdaptationEngine,
+    EpochMetrics,
+    TargetAdaptationTrainer,
+)
 
 __all__ = [
     "mock_inputs",
@@ -30,4 +34,6 @@ __all__ = [
     "compute_rotation_loss",
     "CAPAFiLossEngine",
     "TargetAdaptationTrainer",
+    "CAPAFiAdaptationEngine",
+    "EpochMetrics",
 ]
