@@ -73,6 +73,7 @@ source_training:
   optimizer: "AdamW"
   scheduler: "CosineAnnealingLR"
   matcher: "hungarian"            # Hungarian Bipartite Matcher for permutation invariance
+  lambda_rot_source: 0.5          # REQUIRED — rotation SSL weight for source training (open team decision)
   checkpoint_path: "checkpoints/source_model.pt"
 
 # --- Target Adaptation Engine: CAPA-Fi (Member 3: Athishta P. A. - MY ROLE) ---
