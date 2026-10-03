@@ -45,8 +45,6 @@ Thumbs.db
 *.pth
 *.ckpt
 docs/
-checkpoints/
-!checkpoints/.gitkeep
 runs/
 logs/
 wandb/
