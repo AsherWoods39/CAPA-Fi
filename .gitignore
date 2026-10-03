@@ -41,8 +41,6 @@ venv.bak/
 Thumbs.db
 
 # PyTorch Checkpoints & Artifacts
-*.pt
-*.pth
 *.ckpt
 docs/
 runs/
