@@ -20,7 +20,7 @@ data:
   max_memory_gb: 8.0              # Strict memory ceiling [4.0, 8.0] GB
   
   # CSI Dimensions & Sampling
-  window_size_T: 500              # Temporal time packets per sample window
+  window_size_T: 3000             # Temporal time packets per sample window
   subcarriers_S: 30               # OFDM subcarrier count (Intel 5300 format)
   channels_C: 3                   # Number of antenna pairs / receiver channels
   sampling_rate_hz: 1000          # CSI packet frequency in Hz
@@ -44,7 +44,7 @@ data:
 
 # --- Model Architecture (Member 2: Ashlin Joe) ---
 model:
-  max_users_M: 2                  # Number of concurrent user prediction slots
+  max_users_M: 6                  # Number of concurrent user prediction slots
   num_activity_classes_K: 6       # Active human activity categories
   total_classes: 7                # K + 1 (includes Class 0: No-Person)
   
