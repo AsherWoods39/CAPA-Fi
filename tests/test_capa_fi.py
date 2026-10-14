@@ -59,6 +59,21 @@ from src.adaptation.loss_engine import (
 )
 from src.adaptation.trainer import TargetAdaptationTrainer, CAPAFiAdaptationEngine
 from src.adaptation.mock_inputs import MockHARModel, generate_mock_logits
+from src.evaluation.metrics import (
+    match_slots_hungarian,
+    compute_slot_wise_accuracy,
+    compute_occupancy_mae,
+    compute_macro_f1,
+    compute_exact_match_ratio,
+    evaluate_predictions,
+)
+from src.evaluation.benchmark import (
+    plot_confusion_matrix,
+    plot_tsne_embeddings,
+    plot_loss_curves,
+    export_latex_table,
+    run_benchmark,
+)
 
 
 # =============================================================================
@@ -684,3 +699,100 @@ class TestTargetAdaptationTrainer:
         gamma = engine.compute_category_mask(probs, w)
         assert w.shape == (8,)
         assert gamma.shape == (6,)
+
+
+# =============================================================================
+# MODULE 4 — Evaluation & Benchmarking
+# =============================================================================
+
+class TestEvaluationMetrics:
+    """Tests for Hungarian slot matching, slot accuracy, occupancy MAE, F1, exact match."""
+
+    def test_slot_wise_accuracy_perfect(self):
+        preds = torch.tensor([[1, 2, 0], [3, 0, 0]])
+        targets = torch.tensor([[1, 2, 0], [3, 0, 0]])
+        assert compute_slot_wise_accuracy(preds, targets) == 1.0
+
+    def test_slot_wise_accuracy_imperfect(self):
+        preds = torch.tensor([[1, 2, 0], [3, 0, 0]])
+        targets = torch.tensor([[1, 3, 0], [3, 0, 0]])  # 5 of 6 correct
+        assert pytest.approx(compute_slot_wise_accuracy(preds, targets), 0.01) == 5 / 6
+
+    def test_slot_wise_accuracy_active_only(self):
+        # Slots with target=0 ignored
+        preds = torch.tensor([[1, 5, 0]])
+        targets = torch.tensor([[1, 0, 0]])  # only slot 0 is active (target != 0)
+        # Active accuracy checks only slot 0: pred=1, target=1 -> 1.0
+        assert compute_slot_wise_accuracy(preds, targets, ignore_empty=True) == 1.0
+
+    def test_occupancy_mae(self):
+        # Sample 1: true=2 users, pred=2 users (err 0)
+        # Sample 2: true=1 user, pred=3 users (err 2)
+        # Mean MAE = (0 + 2) / 2 = 1.0
+        preds = torch.tensor([[1, 2, 0], [1, 2, 3]])
+        targets = torch.tensor([[1, 3, 0], [1, 0, 0]])
+        assert compute_occupancy_mae(preds, targets) == 1.0
+
+    def test_macro_f1_bounds(self):
+        preds = torch.randint(0, 7, (10, 6))
+        targets = torch.randint(0, 7, (10, 6))
+        f1 = compute_macro_f1(preds, targets, num_classes=7)
+        assert 0.0 <= f1 <= 1.0
+
+    def test_exact_match_ratio(self):
+        preds = torch.tensor([[1, 2], [3, 4]])
+        targets = torch.tensor([[1, 2], [3, 5]])  # 1 of 2 exact match
+        assert compute_exact_match_ratio(preds, targets) == 0.5
+
+    def test_hungarian_matching_invariance(self):
+        # Target: slot 0 is class 1, slot 1 is class 2
+        targets = torch.tensor([[1, 2]])
+        # Logits predicting slot 0 as class 2, slot 1 as class 1 (swapped order)
+        logits = torch.zeros((1, 2, 7))
+        logits[0, 0, 2] = 10.0  # slot 0 -> class 2
+        logits[0, 1, 1] = 10.0  # slot 1 -> class 1
+
+        matched_preds, _ = match_slots_hungarian(logits, targets)
+        # Hungarian matching should align predictions to targets: slot 0->1, slot 1->2
+        assert matched_preds[0, 0].item() == 1
+        assert matched_preds[0, 1].item() == 2
+
+    def test_evaluate_predictions_dict_keys(self):
+        logits = torch.randn(4, 6, 7)
+        targets = torch.randint(0, 7, (4, 6))
+        metrics = evaluate_predictions(logits, targets)
+        expected_keys = [
+            "slot_wise_accuracy",
+            "active_slot_accuracy",
+            "occupancy_mae",
+            "macro_f1",
+            "macro_f1_active",
+            "exact_match_ratio",
+        ]
+        for key in expected_keys:
+            assert key in metrics
+            assert isinstance(metrics[key], float)
+
+
+class TestEvaluationBenchmark:
+    """Tests for benchmarking execution, visualizations, and LaTeX table generation."""
+
+    def test_latex_table_export(self, tmp_path):
+        dummy_results = {
+            "Baseline": {"slot_wise_accuracy": 0.5, "active_slot_accuracy": 0.4, "macro_f1": 0.45, "occupancy_mae": 1.2},
+            "CAPA-Fi": {"slot_wise_accuracy": 0.85, "active_slot_accuracy": 0.80, "macro_f1": 0.82, "occupancy_mae": 0.3},
+        }
+        out_file = str(tmp_path / "table.tex")
+        content = export_latex_table(dummy_results, save_path=out_file)
+        assert Path(out_file).exists()
+        assert r"\begin{tabular}" in content
+        assert "CAPA-Fi" in content
+
+    def test_run_benchmark_smoke(self, tmp_path):
+        # Smoke test running benchmark under partial_75 with small sample size
+        metrics = run_benchmark(protocol="partial_75", num_eval_samples=8)
+        assert "slot_wise_accuracy" in metrics
+        assert "occupancy_mae" in metrics
+        assert Path("results/benchmark_partial_75.json").exists()
+        assert Path("results/confusion_matrix_partial_75.png").exists()
+

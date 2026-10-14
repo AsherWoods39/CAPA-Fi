@@ -42,7 +42,6 @@ Thumbs.db
 
 # PyTorch Checkpoints & Artifacts
 *.ckpt
-docs/
 runs/
 logs/
 wandb/

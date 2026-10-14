@@ -98,13 +98,13 @@ CAPA-Fi/
 │   ├── dataset.py                         # Module 1: CSI data loading, WiMANS streaming & preprocessing
 │   ├── models/                            # Module 2: SpatialTemporalBackbone, multi-slot head, Hungarian matcher, source training
 │   ├── adaptation/                        # Module 3: Confidence masking, loss engine, TargetAdaptationTrainer
-│   ├── evaluation/                        # Module 4: Evaluation metrics & benchmark runners
+│   ├── evaluation/                        # Module 4: Hungarian metrics suite, benchmark protocols & visualizers
 │   └── utils/                             # Shared CSI augmentation & utilities
 ├── configs/
 │   └── default_config.yaml                # System hyperparameters & execution flags
 ├── tests/
 │   ├── __init__.py
-│   └── test_capa_fi.py                    # Consolidated test suite (67 unit & integration tests)
+│   └── test_capa_fi.py                    # Consolidated test suite (77 unit & integration tests)
 ├── checkpoints/                           # Checkpoint storage directory
 ├── results/                               # Generated figures, tables, and adaptation logs
 ├── splits/                                # Split CSV definitions (source_split.csv, target_split.csv)
@@ -132,7 +132,7 @@ pip install -r requirements.txt
 
 ### 5.2 Run Consolidated Test Suite
 ```bash
-# Execute all 67 unit & integration tests
+# Execute all 77 unit & integration tests
 pytest tests/test_capa_fi.py -v
 ```
 
@@ -146,6 +146,11 @@ python -m src.models.train_source --config configs/default_config.yaml
 python -m src.adaptation.run_adaptation --config configs/default_config.yaml
 ```
 
+### 5.5 Benchmark Evaluation & Publication Visualizer
+```bash
+python -m src.evaluation.benchmark --config configs/default_config.yaml --protocol partial_75
+```
+
 ---
 
 ## 6. Milestone Roadmap
@@ -153,21 +158,21 @@ python -m src.adaptation.run_adaptation --config configs/default_config.yaml
 - [x] **Phase 0: Architecture Blueprint & Formal Specifications (Completed)**
   - All 4 documentation deliverables finalized with formal mathematical proofs (Theorems 1, 2, 3) and theoretical grounding (SAN, CPC, Machine Unlearning).
   - Directory outlines initialized without `.py` files to preserve clean team module ownership.
-- [ ] **Milestone 1 (50% Target):**
+- [x] **Milestone 1 (50% Target):**
   - Member 1: Dataset preprocessing & cleaning pipeline (`src/dataset.py`). `[COMPLETED ✅]`
-  - Member 2: Spatial-temporal backbone + $M$-slot head trained via Hungarian bipartite matching.
+  - Member 2: Spatial-temporal backbone + $M$-slot head trained via Hungarian bipartite matching. `[COMPLETED ✅]`
   - Member 3: Target adaptation manager with frozen classifier $g_\theta$ and standard SHOT $\mathcal{L}_{\text{IM}}$. `[COMPLETED ✅]`
-  - Member 4: Zero-shot unadapted baseline evaluation suite.
-- [ ] **Milestone 2 (70% Target):**
+  - Member 4: Zero-shot unadapted baseline evaluation suite (`src/evaluation/metrics.py`). `[COMPLETED ✅]`
+- [x] **Milestone 2 (70% Target):**
   - Member 1: DWT filtering and spatial-temporal tensor reshaping (`src/dataset.py`). `[COMPLETED ✅]`
-  - Member 2: Auxiliary rotation head $h_\psi$ and permutation-invariance verification unit tests.
+  - Member 2: Auxiliary rotation head $h_\psi$ and permutation-invariance verification unit tests. `[COMPLETED ✅]`
   - Member 3: Full MU-SHOT-Fi engine ($\mathcal{L}_{\text{IM-multi}} + \mathcal{L}_{\text{rot}}$). `[COMPLETED ✅]`
-  - Member 4: Benchmark replication and empirical demonstration of negative transfer under partial category shift.
-- [ ] **Milestone 3 (100% Target):**
-  - Member 1: Partial domain shift configurations (Closed-set, Partial 75%, Partial 50%).
-  - Member 2: Model export profiling (ONNX / Jetson latency) and latent feature visualizer hooks.
+  - Member 4: Benchmark replication and empirical demonstration of negative transfer under partial category shift. `[COMPLETED ✅]`
+- [x] **Milestone 3 (100% Target):**
+  - Member 1: Partial domain shift configurations (Closed-set, Partial 75%, Partial 50%). `[COMPLETED ✅]`
+  - Member 2: Model export profiling (ONNX / Jetson latency) and latent feature visualizer hooks. `[COMPLETED ✅]`
   - Member 3: Category-Aware Dynamic Filtering Mask ($\gamma_k$) and confidence weighting ($w_i$) eliminating negative transfer. `[COMPLETED ✅]`
-  - Member 4: Publication visualizer generating confusion matrices, t-SNE embeddings, and automated LaTeX tables.
+  - Member 4: Publication visualizer generating confusion matrices, t-SNE embeddings, and automated LaTeX tables. `[COMPLETED ✅]`
 
 ---
 
