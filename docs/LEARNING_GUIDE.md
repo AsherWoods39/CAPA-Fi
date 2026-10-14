@@ -482,16 +482,58 @@ Adapts the pre-trained encoder to the unseen Target Domain (Room 2, 2.4 GHz) **w
 
 ### 4.4 Phase 4: Target Evaluation & Benchmarking
 
-Evaluates model performance across three test regimes:
-1. `closed_set` (100% label overlap)
-2. `partial_75` (75% label overlap — 4 of 6 classes active)
-3. `partial_50` (50% label overlap — 3 of 6 classes active)
+Evaluates model performance across three partial domain shift regimes:
+1. `closed_set`: Full class overlap $\mathcal{Y}_t = \{1, 2, 3, 4, 5, 6\}$
+2. `partial_75`: 75% overlap $\mathcal{Y}_t = \{1, 2, 3, 4\}$ (Classes 5:Wave and 6:Pick-up absent)
+3. `partial_50`: 50% overlap $\mathcal{Y}_t = \{1, 2, 3\}$ (Classes 4:Fall, 5:Wave, and 6:Pick-up absent)
 
-* **Key Metrics Computed**:
-  * **Slot-Wise Accuracy**: Percentage of correct activity predictions across active slots.
-  * **Macro F1-Score**: Evaluates unweighted class-balanced recognition.
-  * **Occupancy MAE**: Mean Absolute Error between predicted active slots vs. true concurrent user count.
-  * **Negative Transfer Ratio**: Performance delta between CAPA-Fi vs. naive SHOT adaptation.
+#### Execution Commands:
+
+1. **Standard Partial Shift Benchmark (75% Overlap — Primary Protocol)**:
+   ```bash
+   python -m src.evaluation.benchmark --protocol partial_75
+   ```
+
+2. **Severe Partial Shift Benchmark (50% Overlap)**:
+   ```bash
+   python -m src.evaluation.benchmark --protocol partial_50
+   ```
+
+3. **Closed-Set Benchmark (100% Overlap)**:
+   ```bash
+   python -m src.evaluation.benchmark --protocol closed_set
+   ```
+
+4. **Fast Smoke Test (~5 seconds)**:
+   ```bash
+   python -m src.evaluation.benchmark --protocol partial_75 --samples 16
+   ```
+
+#### CLI Options Reference:
+* `--protocol <str>`: Domain shift protocol (`closed_set`, `partial_75`, or `partial_50`, default: `partial_75`).
+* `--checkpoint <str>`: Path to model checkpoint to evaluate (default: `checkpoints/adapted_model.pt`).
+* `--config <str>`: Path to YAML config file (default: `configs/default_config.yaml`).
+* `--samples <int>`: Number of evaluation samples (default: `64`).
+
+#### Generated Output Artifacts (Saved in `results/`):
+* `results/benchmark_{protocol}.json`: Machine-readable telemetry metrics (Slot Acc, Active Acc, Macro F1, Occ MAE, Exact Match).
+* `results/confusion_matrix_{protocol}.png`: Normalized activity prediction heatmap.
+* `results/tsne_{protocol}.png`: 2D t-SNE manifold projections of the latent feature space $z$.
+* `results/adaptation_loss_curves.png`: Multi-epoch loss convergence telemetry.
+* `results/benchmark_table_{protocol}.tex`: Automated publication-ready LaTeX comparison table.
+
+#### Programmatic Usage in Python:
+```python
+from src.evaluation import evaluate_predictions, run_benchmark
+
+# 1. Direct evaluation on model output logits:
+metrics = evaluate_predictions(logits=logits, target_slots=target_slots)
+print(f"Slot Accuracy: {metrics['slot_wise_accuracy']*100:.1f}%")
+print(f"Occupancy MAE: {metrics['occupancy_mae']:.3f}")
+
+# 2. Run benchmark on checkpoint:
+results = run_benchmark(protocol="partial_75", model_checkpoint="checkpoints/adapted_model.pt")
+```
 
 ---
 

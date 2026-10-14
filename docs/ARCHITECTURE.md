@@ -367,16 +367,20 @@ src/adaptation/run_adaptation.py
     ▼
 checkpoints/adapted_model.pt
 
-Phase 3: EVALUATION (Member 4)
-────────────────────────────────
-src/evaluation/
-    ├─ Slot-wise accuracy
-    ├─ Macro F1
-    ├─ Exact match ratio
-    ├─ Occupancy MAE
-    ├─ Confusion matrix
-    ├─ t-SNE embedding visualization
-    └─ LaTeX table export
+Phase 3: EVALUATION & BENCHMARKING (Member 4)
+─────────────────────────────────────────────
+checkpoints/adapted_model.pt
+    │
+    ▼
+src/evaluation/benchmark.py (--protocol [closed_set | partial_75 | partial_50])
+    │   ├─ match_slots_hungarian → optimal bipartite permutation alignment
+    │   ├─ evaluate_predictions → Slot-Acc, Active-Acc, Macro-F1, Occ-MAE, Exact-Match
+    │   ├─ plot_confusion_matrix → results/confusion_matrix_{protocol}.png
+    │   ├─ plot_tsne_embeddings → results/tsne_{protocol}.png
+    │   ├─ plot_loss_curves → results/adaptation_loss_curves.png
+    │   └─ export_latex_table → results/benchmark_table_{protocol}.tex
+    ▼
+results/benchmark_{protocol}.json
 ```
 
 ---

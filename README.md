@@ -148,8 +148,16 @@ python -m src.adaptation.run_adaptation --config configs/default_config.yaml
 
 ### 5.5 Benchmark Evaluation & Publication Visualizer
 ```bash
-python -m src.evaluation.benchmark --config configs/default_config.yaml --protocol partial_75
+# Evaluate on 75% partial category shift (Primary protocol)
+python -m src.evaluation.benchmark --protocol partial_75
+
+# Evaluate on severe partial shift (50% category overlap)
+python -m src.evaluation.benchmark --protocol partial_50
+
+# Evaluate on closed-set domain shift (100% overlap)
+python -m src.evaluation.benchmark --protocol closed_set
 ```
+* Generates `results/confusion_matrix_{protocol}.png`, `results/tsne_{protocol}.png`, `results/adaptation_loss_curves.png`, `results/benchmark_table_{protocol}.tex`, and `results/benchmark_{protocol}.json`.
 
 ---
 
