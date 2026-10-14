@@ -182,12 +182,12 @@ def main():
     assert is_frozen, "CRITICAL ERROR: Classifier head weights diverged during adaptation!"
     
     print("\n[SUCCESS] Adaptation completed successfully!")
-    print(f"  • Final Total Loss: {history['loss_total'][-1]:.4f}")
-    print(f"  • Final Entropy Loss: {history['loss_entropy'][-1]:.4f}")
-    print(f"  • Final Diversity Loss: {history['loss_diversity'][-1]:.4f}")
-    print(f"  • Final Mean Confidence: {history['mean_confidence'][-1]:.4f}")
-    print(f"  • Checkpoint saved: {save_ckpt}")
-    print(f"  • Metrics saved: {results_json}")
+    print(f"  - Final Total Loss: {history['loss_total'][-1]:.4f}")
+    print(f"  - Final Entropy Loss: {history['loss_entropy'][-1]:.4f}")
+    print(f"  - Final Diversity Loss: {history['loss_diversity'][-1]:.4f}")
+    print(f"  - Final Mean Confidence: {history['mean_confidence'][-1]:.4f}")
+    print(f"  - Checkpoint saved: {save_ckpt}")
+    print(f"  - Metrics saved: {results_json}")
     print("==================================================================")
 
 

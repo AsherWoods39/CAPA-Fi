@@ -339,7 +339,7 @@ def train_source(config: Dict) -> HARModel:
                 optimizer=optimizer,
                 config=config,
             )
-            logger.info(f"  → Saved best checkpoint (loss={best_loss:.4f})")
+            logger.info(f"  -> Saved best checkpoint (loss={best_loss:.4f})")
 
     # --- Save final checkpoint ---
     final_path = checkpoint_path.replace(".pt", "_final.pt")
