@@ -91,31 +91,30 @@ The repository is modularly structured to reflect the 4 core team responsibiliti
 
 ```text
 CAPA-Fi/
-├── docs/                                  # Central documentation directory
-│   ├── SYSTEM_ARCHITECTURE.md             # Theoretical foundation, baselines, & 6-stage pipeline
-│   ├── PROJECT_MILESTONES.md              # 50%, 70%, 100% milestone execution specifications
-│   ├── RESEARCH_GAP_AND_NOVELTY.md        # Literature background, SAN/CPC/Unlearning grounding & proofs
-│   └── ARCHITECTURE_SPEC.md              # Modular tensor contracts & inter-module interfaces
-├── src/                                   # Source code directory outline (No .py files initially)
-│   ├── data/                              # Member 1 (Abey John Pramod)
-│   ├── models/                            # Member 2 (Ashlin Joe)
-│   ├── adaptation/                        # Member 3 (Athishta P. A. - Lead Role)
-│   ├── evaluation/                        # Member 4 (Fathima Bushara M. C.)
-│   └── utils/                             # Shared utility routines
+├── docs/                                  # Central consolidated documentation
+│   ├── ARCHITECTURE.md                    # Total system architecture, workflow pipeline & methodology
+│   └── LEARNING_GUIDE.md                  # Comprehensive educational codebase walkthrough & guide
+├── src/                                   # Source code directory
+│   ├── dataset.py                         # Module 1: CSI data loading, WiMANS streaming & preprocessing
+│   ├── models/                            # Module 2: SpatialTemporalBackbone, multi-slot head, Hungarian matcher, source training
+│   ├── adaptation/                        # Module 3: Confidence masking, loss engine, TargetAdaptationTrainer
+│   ├── evaluation/                        # Module 4: Evaluation metrics & benchmark runners
+│   └── utils/                             # Shared CSI augmentation & utilities
 ├── configs/
 │   └── default_config.yaml                # System hyperparameters & execution flags
+├── tests/
+│   ├── __init__.py
+│   └── test_capa_fi.py                    # Consolidated test suite (67 unit & integration tests)
 ├── checkpoints/                           # Checkpoint storage directory
-├── results/                               # Generated figures, tables, and logs
-├── .gitignore                             # Ignore rules for PyTorch, datasets, checkpoints
+├── results/                               # Generated figures, tables, and adaptation logs
+├── splits/                                # Split CSV definitions (source_split.csv, target_split.csv)
 ├── requirements.txt                       # Python environment dependencies
 └── README.md                              # Root repository landing page
 ```
 
 ### Detailed Documentation Links
-* [System Architecture & Theoretical Framework](file:///c:/Users/sindh/source/repos/AsherWood39/CAPA-Fi/docs/SYSTEM_ARCHITECTURE.md)
-* [Literature Background, Research Gaps, & Theoretical Novelty](file:///c:/Users/sindh/source/repos/AsherWood39/CAPA-Fi/docs/RESEARCH_GAP_AND_NOVELTY.md)
-* [Project Milestone Execution Specifications](file:///c:/Users/sindh/source/repos/AsherWood39/CAPA-Fi/docs/PROJECT_MILESTONES.md)
-* [Modular Architecture & Tensor Contract Specification](file:///c:/Users/sindh/source/repos/AsherWood39/CAPA-Fi/docs/ARCHITECTURE_SPEC.md)
+* [System Architecture, Workflow Pipeline & Methodology](docs/ARCHITECTURE.md)
+* [Comprehensive Codebase Learning Guide](docs/LEARNING_GUIDE.md)
 
 ---
 
@@ -131,19 +130,20 @@ cd CAPA-Fi
 pip install -r requirements.txt
 ```
 
-### 5.2 Source Model Pre-Training (Supervised Hungarian Matching)
+### 5.2 Run Consolidated Test Suite
+```bash
+# Execute all 67 unit & integration tests
+pytest tests/test_capa_fi.py -v
+```
+
+### 5.3 Source Model Pre-Training (Supervised Hungarian Matching)
 ```bash
 python -m src.models.train_source --config configs/default_config.yaml
 ```
 
-### 5.3 Source-Free Target Adaptation (CAPA-Fi)
+### 5.4 Source-Free Target Adaptation (CAPA-Fi)
 ```bash
-python -m src.adaptation.adapt --config configs/default_config.yaml --method capa_fi
-```
-
-### 5.4 Benchmark Evaluation on Partial Category Shift
-```bash
-python -m src.evaluation.benchmark --config configs/default_config.yaml --protocol partial_75
+python -m src.adaptation.run_adaptation --config configs/default_config.yaml
 ```
 
 ---

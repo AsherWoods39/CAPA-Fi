@@ -137,6 +137,8 @@ def train_one_epoch(
     augmentor: Optional[CSIAugmentor],
     device: torch.device,
     epoch: int,
+    limit_batches: Optional[int] = None,
+    log_interval: int = 5,
 ) -> Dict[str, float]:
     """
     Train for one epoch.
@@ -150,8 +152,10 @@ def train_one_epoch(
     running_ce = 0.0
     running_rot = 0.0
     num_batches = 0
+    total_batches = min(len(dataloader), limit_batches) if limit_batches else len(dataloader)
 
     for batch_idx, (x, target_slots) in enumerate(dataloader):
+        batch_start = time.time()
         x = x.to(device)                         # [B, C, T, S]
         target_slots = target_slots.to(device)   # [B, M]
 
@@ -189,13 +193,18 @@ def train_one_epoch(
         running_rot += losses["rotation"].item()
         num_batches += 1
 
-        if (batch_idx + 1) % 10 == 0:
+        batch_duration = time.time() - batch_start
+        if batch_idx == 0 or (batch_idx + 1) % log_interval == 0 or (batch_idx + 1) == total_batches:
             logger.info(
-                f"  Epoch {epoch} | Batch {batch_idx + 1}/{len(dataloader)} | "
+                f"  Epoch {epoch} | Batch {batch_idx + 1}/{total_batches} ({batch_duration:.1f}s/batch) | "
                 f"Loss: {losses['total'].item():.4f} "
                 f"(CE: {losses['matched_ce'].item():.4f}, "
                 f"Rot: {losses['rotation'].item():.4f})"
             )
+
+        if limit_batches is not None and (batch_idx + 1) >= limit_batches:
+            logger.info(f"  [Epoch {epoch}] Reached limit of {limit_batches} batches.")
+            break
 
     avg_metrics = {
         "total": running_total / max(num_batches, 1),
@@ -206,12 +215,22 @@ def train_one_epoch(
     return avg_metrics
 
 
-def train_source(config: Dict) -> HARModel:
+def train_source(
+    config: Dict,
+    epochs_override: Optional[int] = None,
+    batch_size_override: Optional[int] = None,
+    limit_batches: Optional[int] = None,
+    log_interval: int = 5,
+) -> HARModel:
     """
     Full source domain pre-training pipeline.
 
     Args:
         config: Parsed YAML configuration dictionary.
+        epochs_override: Optional CLI override for number of training epochs.
+        batch_size_override: Optional CLI override for batch size.
+        limit_batches: Optional limit on batches per epoch (for quick testing).
+        log_interval: Batch logging interval (always logs batch 1).
 
     Returns:
         Trained HARModel instance.
@@ -226,6 +245,9 @@ def train_source(config: Dict) -> HARModel:
             "This value is required for source training and must be decided by the team. "
             "Do not hard-code a default — set it explicitly in configs/default_config.yaml."
         )
+
+    batch_size = batch_size_override if batch_size_override is not None else source_cfg.get("batch_size", 32)
+    epochs = epochs_override if epochs_override is not None else source_cfg.get("epochs", 50)
 
     # --- Device setup ---
     system_cfg = config.get("system", {})
@@ -270,7 +292,7 @@ def train_source(config: Dict) -> HARModel:
 
     dataloader = DataLoader(
         dataset,
-        batch_size=source_cfg.get("batch_size", 32),
+        batch_size=batch_size,
         shuffle=True,
         num_workers=system_cfg.get("num_workers", 0),
         pin_memory=system_cfg.get("pin_memory", True) if torch.cuda.is_available() else False,
@@ -288,7 +310,6 @@ def train_source(config: Dict) -> HARModel:
     )
 
     # --- Build scheduler ---
-    epochs = source_cfg.get("epochs", 50)
     scheduler = CosineAnnealingLR(optimizer, T_max=epochs)
 
     # --- Build augmentor ---
@@ -301,8 +322,10 @@ def train_source(config: Dict) -> HARModel:
     # --- Training loop ---
     logger.info(f"Starting source training for {epochs} epochs")
     logger.info(f"  lambda_rot_source = {lambda_rot_source}")
-    logger.info(f"  batch_size = {source_cfg.get('batch_size', 32)}")
+    logger.info(f"  batch_size = {batch_size}")
     logger.info(f"  learning_rate = {source_cfg.get('learning_rate', 1e-3)}")
+    if limit_batches is not None:
+        logger.info(f"  limit_batches = {limit_batches} batches/epoch")
 
     best_loss = float("inf")
 
@@ -317,6 +340,8 @@ def train_source(config: Dict) -> HARModel:
             augmentor=augmentor,
             device=device,
             epoch=epoch,
+            limit_batches=limit_batches,
+            log_interval=log_interval,
         )
 
         scheduler.step()
@@ -339,7 +364,7 @@ def train_source(config: Dict) -> HARModel:
                 optimizer=optimizer,
                 config=config,
             )
-            logger.info(f"  → Saved best checkpoint (loss={best_loss:.4f})")
+            logger.info(f"  -> Saved best checkpoint (loss={best_loss:.4f})")
 
     # --- Save final checkpoint ---
     final_path = checkpoint_path.replace(".pt", "_final.pt")
@@ -368,6 +393,30 @@ def main():
         default="configs/default_config.yaml",
         help="Path to YAML config file",
     )
+    parser.add_argument(
+        "--epochs",
+        type=int,
+        default=None,
+        help="Override number of training epochs (e.g. --epochs 1)",
+    )
+    parser.add_argument(
+        "--batch_size",
+        type=int,
+        default=None,
+        help="Override batch size (e.g. --batch_size 4 to run faster on CPU)",
+    )
+    parser.add_argument(
+        "--limit_batches",
+        type=int,
+        default=None,
+        help="Limit number of batches per epoch (e.g. --limit_batches 3 for testing)",
+    )
+    parser.add_argument(
+        "--log_interval",
+        type=int,
+        default=5,
+        help="Batch logging frequency (default: 5, always logs batch 1)",
+    )
     args = parser.parse_args()
 
     # Load config
@@ -375,7 +424,13 @@ def main():
         config = yaml.safe_load(f)
 
     # Run training
-    train_source(config)
+    train_source(
+        config=config,
+        epochs_override=args.epochs,
+        batch_size_override=args.batch_size,
+        limit_batches=args.limit_batches,
+        log_interval=args.log_interval,
+    )
 
 
 if __name__ == "__main__":

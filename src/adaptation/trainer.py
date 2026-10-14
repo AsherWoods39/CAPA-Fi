@@ -265,7 +265,7 @@ class TargetAdaptationTrainer:
             with open(res_file, "w", encoding="utf-8") as f:
                 json.dump(history, f, indent=2)
             if verbose:
-                print(f"[Results saved] → {res_file}")
+                print(f"[Results saved] -> {res_file}")
                 
         return history
     
@@ -274,7 +274,7 @@ class TargetAdaptationTrainer:
         target_path = Path(path)
         target_path.parent.mkdir(parents=True, exist_ok=True)
         torch.save(self.model.state_dict(), str(target_path))
-        print(f"[Checkpoint saved] → {target_path}")
+        print(f"[Checkpoint saved] -> {target_path}")
     
     def verify_classifier_frozen(self, state_before: dict) -> bool:
         """Verify g_θ weights haven't changed after adaptation."""
