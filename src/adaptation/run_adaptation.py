@@ -140,7 +140,6 @@ def load_or_create_model(config: dict) -> torch.nn.Module:
 def main():
     print("==================================================================")
     print("      CAPA-Fi: Category-Aware Partial Adaptation Engine           ")
-    print("    Module 3 Lead: Athishta P. A. | Source-Free SSL Execution     ")
     print("==================================================================")
     
     # 1. Load Configuration
