@@ -41,12 +41,8 @@ venv.bak/
 Thumbs.db
 
 # PyTorch Checkpoints & Artifacts
-*.pt
-*.pth
 *.ckpt
 docs/
-checkpoints/
-!checkpoints/.gitkeep
 runs/
 logs/
 wandb/
