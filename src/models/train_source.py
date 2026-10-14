@@ -7,15 +7,22 @@ Pipeline per batch:
     1. Load labeled source batch (x, target_slots) from DataLoader
     2. Apply augmentation to classification inputs
     3. Construct rotation pair: x_original (label=0) + x_rotated (label=1)
+       NOTE: Rotation is subcarrier-axis flip only (dims=[-1]), NOT joint temporal+subcarrier.
+             Joint flip (dims=[-2,-1]) causes BiLSTM global mean-pool symmetry:
+             forward-pass of reversed time == backward-pass of original → z_orig ≈ z_rot → random guessing.
     4. Forward through backbone → z
     5. Forward z through classifier → logits [B, 6, 7]
     6. Forward z through rotation head → rot_logits [2B, 2]
     7. Hungarian match logits vs target_slots
     8. Compute L_matched_CE + lambda_rot_source × L_rotation
-    9. Backprop + optimizer step
+    9. Gradient clip → AdamW step (dual LR groups: backbone vs. rotation head)
 
 Training objective:
     L_source = L_matched_CE + λ_rot_source × L_rotation
+
+Optimizer groups:
+    Group 0 (backbone + classifier): lr = learning_rate
+    Group 1 (rotation_head):         lr = learning_rate_rot_head  (default 10× backbone LR)
 
 Usage:
     python -m src.models.train_source --config configs/default_config.yaml
@@ -95,28 +102,40 @@ def create_rotation_pair(
     x: torch.Tensor,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
-    Create rotation pair from a batch of CSI tensors.
+    Create a self-supervised rotation pair from a batch of CSI tensors.
 
-    This is a fallback implementation for development/testing.
-    In production, Member 1's preprocessing provides the 180° transform.
+    ROTATION STRATEGY: Subcarrier-axis frequency inversion (dims=[-1]) ONLY.
+
+    Why NOT joint temporal+subcarrier flip (dims=[-2,-1]):
+        The backbone uses a Bidirectional LSTM + global temporal mean-pool.
+        Flipping the time axis makes the BiLSTM forward pass trace the
+        backward-pass trajectory of the original sequence. After mean-pooling
+        over all T=375 steps, the two embeddings differ only by a feature
+        permutation inside z, making the rotation head unable to distinguish
+        them → constant 0.693 (ln 2) random-guessing loss.
+
+        Subcarrier-axis inversion reverses the frequency bin ordering
+        (low ↔ high OFDM subcarriers) without touching the temporal axis,
+        producing maximally distinct embeddings that break the BiLSTM symmetry.
 
     Args:
         x: Original CSI tensor [B, C, T, S]
 
     Returns:
-        x_combined: Concatenated [2B, C, T, S] (original + rotated)
-        rot_labels: [2B] rotation labels (0=original, 1=rotated)
+        x_combined: Concatenated [2B, C, T, S] (original + freq-inverted)
+        rot_labels: [2B] rotation labels (0=original, 1=freq-inverted)
         z_split_size: B (for splitting z after backbone)
     """
     B = x.shape[0]
 
-    # 180° inversion: flip temporal and subcarrier axes
-    x_rotated = torch.flip(x, dims=[-2, -1])
+    # Subcarrier-axis frequency inversion: reverse OFDM bin ordering (low <-> high)
+    # dims=[-1] touches only the S=30 subcarrier dimension, leaving T=3000 intact.
+    x_rotated = torch.flip(x, dims=[-1])
 
     # Concatenate along batch dimension
     x_combined = torch.cat([x, x_rotated], dim=0)  # [2B, C, T, S]
 
-    # Rotation labels: 0 for original, 1 for rotated
+    # Rotation labels: 0 for original, 1 for freq-inverted
     rot_labels = torch.cat([
         torch.zeros(B, dtype=torch.long, device=x.device),
         torch.ones(B, dtype=torch.long, device=x.device),
@@ -182,9 +201,10 @@ def train_one_epoch(
         # --- Compute combined loss ---
         losses = loss_fn(logits, target_slots, rot_logits, rot_labels)
 
-        # --- Backprop ---
+        # --- Backprop + gradient clip ---
         optimizer.zero_grad()
         losses["total"].backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
 
         # --- Accumulate metrics ---
@@ -302,11 +322,28 @@ def train_source(
     # --- Build loss function ---
     loss_fn = SourceTrainingLoss(lambda_rot_source=lambda_rot_source)
 
-    # --- Build optimizer ---
+    # --- Build optimizer (dual learning-rate groups) ---
+    # The rotation head requires a higher LR than the main backbone because:
+    #   1. It starts from random initialization and must learn faster.
+    #   2. The backbone gradient signal dominates the L_matched_CE term.
+    #   3. Using the same LR for both causes the rotation head to underfit.
+    backbone_lr = source_cfg.get("learning_rate", 1e-3)
+    rot_lr = source_cfg.get(
+        "learning_rate_rot_head",
+        backbone_lr * 10.0,   # Default: 10× backbone rate
+    )
+    weight_decay = source_cfg.get("weight_decay", 1e-4)
+
+    # Separate rotation head from backbone+classifier parameters
+    rot_head_params = list(model.rotation_head.parameters())
+    rot_head_ids = {id(p) for p in rot_head_params}
+    base_params = [p for p in model.parameters() if id(p) not in rot_head_ids]
+
     optimizer = AdamW(
-        model.parameters(),
-        lr=source_cfg.get("learning_rate", 1e-3),
-        weight_decay=source_cfg.get("weight_decay", 1e-4),
+        [
+            {"params": base_params,    "lr": backbone_lr, "weight_decay": weight_decay},
+            {"params": rot_head_params, "lr": rot_lr,      "weight_decay": weight_decay},
+        ]
     )
 
     # --- Build scheduler ---
@@ -323,7 +360,9 @@ def train_source(
     logger.info(f"Starting source training for {epochs} epochs")
     logger.info(f"  lambda_rot_source = {lambda_rot_source}")
     logger.info(f"  batch_size = {batch_size}")
-    logger.info(f"  learning_rate = {source_cfg.get('learning_rate', 1e-3)}")
+    logger.info(f"  learning_rate (backbone)  = {backbone_lr}")
+    logger.info(f"  learning_rate (rot_head)  = {rot_lr}  (10x backbone)")
+    logger.info(f"  rotation_axis = subcarrier-only (dims=[-1])  [BiLSTM-safe]")
     if limit_batches is not None:
         logger.info(f"  limit_batches = {limit_batches} batches/epoch")
 

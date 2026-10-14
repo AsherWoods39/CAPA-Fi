@@ -68,8 +68,10 @@ model:
 source_training:
   epochs: 50
   batch_size: 32
-  learning_rate: 1.0e-3
+  learning_rate: 1.0e-3           # Backbone + classifier learning rate
+  learning_rate_rot_head: 1.0e-2  # Rotation head LR (10x backbone; separate param group)
   weight_decay: 1.0e-4
+  grad_clip_norm: 1.0             # Max gradient L2 norm before clipping (0 = disabled)
   optimizer: "AdamW"
   scheduler: "CosineAnnealingLR"
   matcher: "hungarian"            # Hungarian Bipartite Matcher for permutation invariance
@@ -89,7 +91,8 @@ adaptation:
   # Loss Formulation Hyperparameters
   lambda_ent: 1.0                 # Conditional entropy weight
   lambda_div: 1.0                 # Marginal diversity weight
-  lambda_rot: 0.5                 # 180° Rotation SSL auxiliary weight
+  lambda_rot: 0.5                 # Frequency-inversion SSL auxiliary weight
+  grad_clip_norm: 1.0             # Max gradient L2 norm for backbone + rot_head (0 = disabled)
 
   # Multi-User Occupancy Gating
   enable_occupancy_weighting: true # p_occ = 1 - p_no_person weighting on diversity

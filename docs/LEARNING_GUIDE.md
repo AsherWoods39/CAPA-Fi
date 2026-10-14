@@ -33,6 +33,11 @@
 5. [How to Run the Tests](#5-how-to-run-the-tests)
 6. [Mental Model: One Forward Pass](#6-mental-model-one-forward-pass)
 7. [Common Questions](#7-common-questions)
+8. [Performance Fixes Applied](#8-performance-fixes-applied)
+   - [Rotation SSL Stagnation Fix](#81-rotation-ssl-stagnation-fix-rot-loss-stuck-at-0693)
+   - [Dual Learning Rate for Rotation Head](#82-dual-learning-rate-for-rotation-head)
+   - [Gradient Clipping](#83-gradient-clipping)
+   - [Convergence Monitoring Checklist](#84-convergence-monitoring-checklist)
 
 ---
 
@@ -567,8 +572,8 @@ x_rot = torch.flip(x_aug, dims=[-2, -1])        # 180° flip
 x_combined = torch.cat([x_aug, x_rot], dim=0)  # [8, 3, 3000, 30]
 
 logits_all, z_all = model(x_combined)           # backbone + classifier
-logits = logits_all[:4]                         # [4, 6, 7] — original only
-rot_logits = model.forward_rotation(z_all)      # [8, 2] — all samples
+logits = logits_all[:4]                         # [4, 6, 7] -- original only
+rot_logits = model.forward_rotation(z_all)      # [8, 2] -- all samples
 
 loss = SourceTrainingLoss(0.5)(logits, target_slots, rot_logits, rot_labels)
 loss["total"].backward()
@@ -576,13 +581,13 @@ optimizer.step()
 
 # Adaptation forward (no labels):
 logits, z = model(x_target)                      # [B, 6, 7], [B, 256]
-x_180 = torch.flip(x_target, dims=[-2, -1])
-_, z_180 = model(x_180)
+x_freq_inv = torch.flip(x_target, dims=[-1])    # Subcarrier-only flip (NOT dims=[-2,-1])
+_, z_freq_inv = model(x_freq_inv)
 rot_0   = model.forward_rotation(z)             # [B, 2]
-rot_180 = model.forward_rotation(z_180)         # [B, 2]
+rot_freq = model.forward_rotation(z_freq_inv)   # [B, 2]
 
 w_i, gamma_k, p_occ = compute_weights_and_masks(logits, mask_engine)
-loss_dict = CAPAFiLossEngine()(logits, rot_0, rot_180, w_i, gamma_k, p_occ)
+loss_dict = CAPAFiLossEngine()(logits, rot_0, rot_freq, w_i, gamma_k, p_occ)
 loss_dict["loss_total"].backward()
 optimizer.step()
 ```
@@ -599,18 +604,92 @@ The classifier (`g_θ`) was trained on source labels and contains the accumulate
 
 If we have two users [Walk, Sit], the DataLoader might put Walk in slot 0 and Sit in slot 1. But the model might naturally predict Sit in slot 0 and Walk in slot 1. Standard cross-entropy would penalise this even though both predictions are correct. The Hungarian matcher finds the permutation that minimizes total cost, making the loss truly permutation-invariant.
 
-**Q: What is the 180° rotation trick?**
+**Q: What is the rotation SSL trick?**
 
-180° rotation (temporal and frequency flip) is a synthetic label we can create from any unlabeled sample. Original → label 0, flipped → label 1. The model must learn to distinguish them. This forces the backbone to maintain meaningful spatial-temporal representations even when there are no activity labels, preventing the backbone from collapsing during adaptation.
+Frequency inversion (subcarrier-axis flip: `dims=[-1]`) is a synthetic label we can create from any unlabeled sample. Original → label 0, freq-inverted → label 1. The model must learn to distinguish them. This forces the backbone to maintain meaningful spectral representations even when there are no activity labels, preventing the backbone from collapsing during adaptation.
+
+**Q: Why do we flip only the subcarrier axis (`dims=[-1]`) and NOT the time axis (`dims=[-2]`)?**
+
+This is a BiLSTM architecture constraint. A Bidirectional LSTM computes both a forward sequence (`h_forward_t`) and a backward sequence (`h_backward_t`) at every timestep. When you flip the time axis of the input, the BiLSTM’s forward pass on the reversed sequence traces *exactly* the backward pass on the original sequence:
+
+```
+h_forward_t(x_reversed) ≈ h_backward_t(x_original)
+```
+
+After global temporal mean-pooling over T=375 steps, the resulting embedding `z` for the flipped input is nearly *identical in magnitude* to the original — just with some feature dimensions permuted. The rotation head receives inputs that are effectively indistinguishable, so it outputs uniform 50/50 logits: **loss stays stuck at `ln(2) ≈ 0.693` forever** (random guessing).
+
+Flipping only the OFDM subcarrier ordering (`dims=[-1]`) reverses the frequency-bin layout (high subcarriers become low and vice versa) without touching the time axis. The CNN spatial blocks process this as a genuinely different spectral fingerprint, giving the rotation head a real discriminative signal to learn from.
+
+**Q: What does the dual learning rate optimizer do?**
+
+During source training, the backbone and classifier use LR=1e-3 while the rotation head uses LR=1e-2 (10x higher). This is necessary because the rotation head is initialized from scratch and its gradients are much weaker than the matched cross-entropy signal driving the backbone. A shared single LR starves the rotation head and keeps its loss at 0.693. The dual-group `AdamW` setup ensures the rotation head adapts at the right speed.
 
 **Q: What happens when `γ_k → 0` for a class?**
 
-When `γ_k` is near 0 for class `k`, the diversity loss term for class `k` is essentially zeroed out. This means the model won't be penalised for ignoring class `k` (which doesn't appear in the target domain anyway). Without this mask, the model would be pushed to predict class `k` uniformly which would cause negative transfer.
+When `γ_k` is near 0 for class `k`, the diversity loss term for class `k` is essentially zeroed out. This means the model won’t be penalised for ignoring class `k` (which doesn’t appear in the target domain anyway). Without this mask, the model would be pushed to predict class `k` uniformly which would cause negative transfer.
 
 **Q: Why is `p_occ` multiplied into the diversity loss?**
 
-If the target environment has empty rooms, the average probability of NO_PERSON is high and `p_occ` is low. Multiplying the diversity loss by `p_occ` reduces its magnitude for empty-room batches — we don't want to force activity diversity when nobody is there.
+If the target environment has empty rooms, the average probability of NO_PERSON is high and `p_occ` is low. Multiplying the diversity loss by `p_occ` reduces its magnitude for empty-room batches — we don’t want to force activity diversity when nobody is there.
 
 **Q: What is `MockHARModel` used for?**
 
-It's a lightweight stand-in for the full `HARModel` that runs faster in tests and doesn't require the full CSI input shape. It has the same external API (`forward`, `forward_rotation`, `freeze_classifier`, `slot_head`, `rot_head`) so the adaptation engine can be tested independently of the full model.
+It’s a lightweight stand-in for the full `HARModel` that runs faster in tests and doesn’t require the full CSI input shape. It has the same external API (`forward`, `forward_rotation`, `freeze_classifier`, `slot_head`, `rot_head`) so the adaptation engine can be tested independently of the full model.
+
+---
+
+## 8. Performance Fixes Applied
+
+### 8.1 Rotation SSL Stagnation Fix (Rot Loss stuck at 0.693)
+
+| | Before fix | After fix |
+|---|---|---|
+| **Flip axis** | `dims=[-2, -1]` (time + subcarrier) | `dims=[-1]` (subcarrier only) |
+| **Expected rot loss** | ~0.693 (random guessing) | ~0.4–0.5 (converging) |
+| **Root cause** | BiLSTM temporal symmetry under global mean-pool | Fixed by using spectral-only inversion |
+
+**Files changed:**
+- [`src/models/train_source.py`](../src/models/train_source.py) — `create_rotation_pair()`: `dims=[-2,-1]` → `dims=[-1]`
+- [`src/adaptation/trainer.py`](../src/adaptation/trainer.py) — `x_target_180 = flip(...)`: `dims=[-2,-1]` → `dims=[-1]`
+
+### 8.2 Dual Learning Rate for Rotation Head
+
+The rotation head now has an independent AdamW parameter group at `lr = 1e-2` (10x the backbone’s 1e-3):
+
+```python
+# In train_source.py
+optimizer = AdamW([
+    {"params": base_params,    "lr": 1e-3},   # backbone + classifier
+    {"params": rot_head_params, "lr": 1e-2},  # rotation head (10x)
+])
+```
+
+Configurable in `configs/default_config.yaml`:
+```yaml
+source_training:
+  learning_rate: 1.0e-3           # backbone + classifier
+  learning_rate_rot_head: 1.0e-2  # rotation head (10x backbone)
+```
+
+### 8.3 Gradient Clipping
+
+`torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)` added before every `optimizer.step()` in:
+- Source training loop (`train_one_epoch` in `train_source.py`)
+- Target adaptation loop (`adapt_epoch` in `trainer.py` — clipped only on trainable parameters)
+
+This prevents occasional large gradient spikes from the BiLSTM and the Hungarian matching loss from destabilizing training.
+
+### 8.4 Convergence Monitoring Checklist
+
+After re-running training you should observe:
+
+| Metric | Epoch 1 | Epoch 10 | Healthy end |
+|--------|---------|----------|-------------|
+| `rot_loss` | ~0.50–0.60 | ~0.25–0.35 | <0.20 |
+| `ce_loss` | ~1.80–2.00 | ~0.60–0.90 | <0.50 |
+| `total` | ~2.2–2.5 | ~0.85–1.2 | <0.70 |
+
+If `rot_loss` stays above 0.60 after 5 epochs, check:
+1. That `create_rotation_pair` uses `dims=[-1]` (not `[-2, -1]`)
+2. That `learning_rate_rot_head` is set and at least 5x the backbone LR
+3. Run the diagnostic: `python -c "from src.models.train_source import create_rotation_pair; import torch; x=torch.randn(2,3,3000,30); xc,_,_=create_rotation_pair(x); print((x[0]-xc[2]).abs().mean())"` — should print a value > 0.5
