@@ -227,7 +227,6 @@ def export_latex_table(
         f.write(table_content)
     logger.info(f"LaTeX comparison table exported to {out_file}")
     return table_content
-
 def run_benchmark(
     config: Optional[Dict] = None,
     protocol: str = "partial_75",
@@ -253,7 +252,7 @@ def run_benchmark(
     )
     model.eval()
 
-    # 2. Load Checkpoint if present
+    # 2. Load Checkpoint if available
     ckpt_path = model_checkpoint or "checkpoints/adapted_model.pt"
     if os.path.isfile(ckpt_path):
         logger.info(f"Loading evaluation checkpoint: {ckpt_path}")
@@ -283,7 +282,7 @@ def run_benchmark(
             for idx, a in enumerate(acts):
                 target_slots[b, idx] = int(a)
 
-    # 5. Forward Pass & Metric Computation (MUST OCCUR BEFORE comparisons DICT)
+    # 5. Forward Pass & Metric Computation
     with torch.no_grad():
         logits, latents = model(x_test)
 
@@ -295,16 +294,29 @@ def run_benchmark(
     with open(results_path, "w") as f:
         json.dump(metrics, f, indent=2)
 
-    # Generate and save confusion matrix image expected by test suite
+    # 6. Extract predictions for Confusion Matrix Plotting
+    # Perform Hungarian bipartite matching to align slot predictions with targets
+    matched_preds, matched_targets = match_slots_hungarian(logits, target_slots)
     cm_path = f"results/confusion_matrix_{protocol}.png"
-    plot_confusion_matrix(
-        logits=logits,
-        targets=target_slots,
-        save_path=cm_path,
-        title=f"CAPA-Fi Confusion Matrix ({protocol.upper()})"
-    )
 
-    # 6. Comparative Benchmarking against Seminar Papers & Baselines
+    # Call plot_confusion_matrix with positional arguments or matched predictions
+    try:
+        plot_confusion_matrix(
+            matched_preds,
+            matched_targets,
+            save_path=cm_path,
+            title=f"CAPA-Fi Confusion Matrix ({protocol.upper()})"
+        )
+    except TypeError:
+        # Fallback if plot_confusion_matrix accepts preds/targets keyword args
+        plot_confusion_matrix(
+            preds=matched_preds,
+            targets=matched_targets,
+            save_path=cm_path,
+            title=f"CAPA-Fi Confusion Matrix ({protocol.upper()})"
+        )
+
+    # 7. Comparative Benchmarking against Seminar Papers & Baselines
     comparisons = {
         "SHOT (Liang et al., 2022)": {
             "slot_wise_accuracy": max(0.20, metrics["slot_wise_accuracy"] - 0.182),
@@ -353,22 +365,6 @@ def run_benchmark(
         },
     }
 
-    # Print ASCII Summary Table
-    print("\n" + "=" * 90)
-    print(f"       EVALUATION BENCHMARK ({protocol.upper()} PROTOCOL): CAPA-FI VS SEMINAR PAPERS")
-    print("=" * 90)
-    print(f"{'Method / Model':<38} | {'Slot-Acc (%)':<12} | {'Active-Acc (%)':<14} | {'Macro F1':<10} | {'Occ MAE':<8}")
-    print("-" * 90)
-    for model_name, m in comparisons.items():
-        clean_name = model_name.replace(r"\textbf{", "").replace("}", "")
-        s_acc = m["slot_wise_accuracy"] * 100
-        a_acc = m["active_slot_accuracy"] * 100
-        f1 = m["macro_f1"]
-        mae = m["occupancy_mae"]
-        print(f"{clean_name:<38} | {s_acc:<12.2f} | {a_acc:<14.2f} | {f1:<10.4f} | {mae:<8.3f}")
-    print("=" * 90 + "\n")
-
-    # Generate LaTeX Table
     export_latex_table(comparisons, save_path=f"results/benchmark_table_{protocol}.tex")
     return metrics
 
