@@ -295,6 +295,15 @@ def run_benchmark(
     with open(results_path, "w") as f:
         json.dump(metrics, f, indent=2)
 
+    # Generate and save confusion matrix image expected by test suite
+    cm_path = f"results/confusion_matrix_{protocol}.png"
+    plot_confusion_matrix(
+        logits=logits,
+        targets=target_slots,
+        save_path=cm_path,
+        title=f"CAPA-Fi Confusion Matrix ({protocol.upper()})"
+    )
+
     # 6. Comparative Benchmarking against Seminar Papers & Baselines
     comparisons = {
         "SHOT (Liang et al., 2022)": {
@@ -361,7 +370,6 @@ def run_benchmark(
 
     # Generate LaTeX Table
     export_latex_table(comparisons, save_path=f"results/benchmark_table_{protocol}.tex")
-
     return metrics
 
 
