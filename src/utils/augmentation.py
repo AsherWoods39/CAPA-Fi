@@ -1,5 +1,5 @@
 """
-CAPA-Fi: CSI Data Augmentation Module (Member 2)
+CAPA-Fi: CSI Data Augmentation Module
 
 Implements time-series augmentation strategies for CSI tensors.
 All augmentations preserve the input shape [B, C, T, S].

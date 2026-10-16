@@ -1,7 +1,5 @@
 """
-CAPA-Fi: Mock Tensors & Synthetic Architecture Generator for Member 3
-Allows standalone development, verification, and unit-testing of the adaptation engine
-without requiring Member 1 (Data) or Member 2 (Models) to be completed first.
+CAPA-Fi: Mock Tensors & Synthetic Architecture Generator
 
 Updated (Stage 0 v2): Aligned with Member 1's MultiUserCSIDataset contract:
   - Raw .npy shape: (T, Tx, Rx, S) with T=fixed_length=3000

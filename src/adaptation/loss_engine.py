@@ -35,10 +35,12 @@ def compute_masked_diversity_loss(probs: torch.Tensor, gamma_k: torch.Tensor, p_
     act_probs = probs[:, :, 1:]         # (B, M, K)
     p_hat = act_probs.mean(dim=[0, 1])  # (K, ) - batch marginal
     # Apply category mask and occupancy gate
+    # Calculate positive marginal entropy: H(p_hat) = - sum(p_hat * log(p_hat))
+    # Masked by gamma_k
+    masked_entropy = -(gamma_k * p_hat * torch.log(p_hat + eps)).sum()
     occ_scalar = p_occ.mean()
-    div = (gamma_k * p_hat * torch.log(p_hat + eps)).sum()
 
-    return occ_scalar * div
+    return occ_scalar * masked_entropy
 
 def compute_rotation_loss(rot_logits_0: torch.Tensor, rot_logits_180: torch.Tensor) -> torch.Tensor:
     """

@@ -1,5 +1,5 @@
 """
-CAPA-Fi: Multi-Slot Classification Head (Member 2)
+CAPA-Fi: Multi-Slot Classification Head
 
 Maps latent embedding z [B, D] → multi-slot logits [B, M, K+1].
 

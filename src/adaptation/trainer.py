@@ -143,14 +143,19 @@ class TargetAdaptationTrainer:
             
             x_target = x_target.to(self.device)
             
-            # Generate 180° inverted counterpart across temporal & subcarrier dimensions
-            x_target_180 = torch.flip(x_target, dims=[-2, -1])
+            # Subcarrier-axis frequency inversion (dims=[-1] only).
+            # We deliberately avoid flipping the temporal axis (dims=[-2]) because
+            # the BiLSTM + global mean-pool makes z(x_flipped_time) ≈ z(x_orig),
+            # reducing the rotation task to random guessing (loss stuck at 0.693).
+            # Reversing only the OFDM subcarrier ordering breaks this symmetry
+            # while remaining a valid self-supervised pretext task.
+            x_target_180 = torch.flip(x_target, dims=[-1])
             
             # Forward pass: original
             logits, z = self.model(x_target)
             rot_logits_0 = self.model.forward_rotation(z)
             
-            # Forward pass: rotated
+            # Forward pass: freq-inverted
             _, z_180 = self.model(x_target_180)
             rot_logits_180 = self.model.forward_rotation(z_180)
             
@@ -170,9 +175,13 @@ class TargetAdaptationTrainer:
                 logits, rot_logits_0, rot_logits_180, w_i, gamma_k, p_occ
             )
             
-            # Backward pass & optimization step
+            # Backward pass, gradient clip & optimization step
             self.optimizer.zero_grad()
             loss_dict["loss_total"].backward()
+            torch.nn.utils.clip_grad_norm_(
+                [p for p in self.model.parameters() if p.requires_grad],
+                max_norm=1.0,
+            )
             self.optimizer.step()
             
             # Accumulate telemetry

@@ -185,14 +185,22 @@ End-to-end supervised source training with rotation SSL.
 Per batch:
   1. Load (x [B,3,3000,30], target_slots [B,6]) from source DataLoader
   2. Apply CSIAugmentor (jitter, scaling, magnitude warp, optional others)
-  3. Create rotation pair: x_original + x_180° → x_combined [2B, 3, 3000, 30]
+  3. Create rotation pair: x_original + x_freq_inv → x_combined [2B, 3, 3000, 30]
+     (frequency inversion = flip subcarrier axis dims=[-1] ONLY — see note below)
   4. backbone(x_combined) → z_combined [2B, 256]
   5. classifier(z_combined[:B]) → logits [B, 6, 7]
   6. rotation_head(z_combined) → rot_logits [2B, 2]
   7. Hungarian matching: assign predicted slots to target slots
   8. Loss = L_matched_CE + λ_rot_source × L_rotation
-  9. AdamW + CosineAnnealingLR backward step
+  9. clip_grad_norm(max=1.0) → AdamW step (dual LR: backbone 1e-3, rot_head 1e-2)
 ```
+
+> **Rotation Axis Note:** Only the **subcarrier axis** (`dims=[-1]`) is inverted, not the time axis.
+> Flipping the time axis in a BiLSTM + global temporal mean-pool architecture produces embeddings
+> that are nearly identical (forward pass ≈ backward pass after pooling), causing the rotation head
+> to output uniform logits (ℓ=0.693 ≈ ln 2, random guessing). Subcarrier inversion reverses OFDM
+> frequency-bin ordering (low↔high) without affecting temporal structure, yielding maximally
+> distinct embeddings that allow the rotation head to learn a real discriminative signal.
 
 #### 2g. Augmentation: `CSIAugmentor` (`src/utils/augmentation.py`)
 
@@ -279,11 +287,13 @@ Parameters frozen: **classifier `g_θ`** — weights must be bitwise invariant a
 ```
 Per batch (unlabeled target CSI):
   1. x_target [B, 3, T, S] → model forward → (logits, z)
-  2. x_target_180 = flip(x_target, dims=[-2,-1]) → model forward → z_180
+  2. x_target_freq_inv = flip(x_target, dims=[-1]) → model forward → z_freq_inv
+     (subcarrier-only inversion — avoids BiLSTM temporal symmetry trap)
   3. Compute w_i, γ_k, p_occ via CategoryMaskEngine
   4. Compute L_total via CAPAFiLossEngine
-  5. optimizer.zero_grad(); L_total.backward(); optimizer.step()
-  6. Accumulate telemetry (entropy, diversity, rotation, confidence, active classes, occupancy)
+  5. optimizer.zero_grad(); L_total.backward()
+  6. clip_grad_norm(trainable params, max=1.0); optimizer.step()
+  7. Accumulate telemetry (entropy, diversity, rotation, confidence, active classes, occupancy)
 
 Per epoch:
   → Returns EpochMetrics (float + dict) with all telemetry averaged
@@ -367,16 +377,20 @@ src/adaptation/run_adaptation.py
     ▼
 checkpoints/adapted_model.pt
 
-Phase 3: EVALUATION (Member 4)
-────────────────────────────────
-src/evaluation/
-    ├─ Slot-wise accuracy
-    ├─ Macro F1
-    ├─ Exact match ratio
-    ├─ Occupancy MAE
-    ├─ Confusion matrix
-    ├─ t-SNE embedding visualization
-    └─ LaTeX table export
+Phase 3: EVALUATION & BENCHMARKING (Member 4)
+─────────────────────────────────────────────
+checkpoints/adapted_model.pt
+    │
+    ▼
+src/evaluation/benchmark.py (--protocol [closed_set | partial_75 | partial_50])
+    │   ├─ match_slots_hungarian → optimal bipartite permutation alignment
+    │   ├─ evaluate_predictions → Slot-Acc, Active-Acc, Macro-F1, Occ-MAE, Exact-Match
+    │   ├─ plot_confusion_matrix → results/confusion_matrix_{protocol}.png
+    │   ├─ plot_tsne_embeddings → results/tsne_{protocol}.png
+    │   ├─ plot_loss_curves → results/adaptation_loss_curves.png
+    │   └─ export_latex_table → results/benchmark_table_{protocol}.tex
+    ▼
+results/benchmark_{protocol}.json
 ```
 
 ---
@@ -409,6 +423,23 @@ L_source = L_matched_CE(logits, target_slots, assignments)
 
 - `L_matched_CE`: permutation-invariant cross-entropy via Hungarian assignment
 - `λ_rot_source = 0.5` (see `configs/default_config.yaml`)
+- **Rotation strategy**: subcarrier-axis frequency inversion (`dims=[-1]`), not temporal flip
+- **Optimizer**: dual-group AdamW `{backbone: lr=1e-3, rotation_head: lr=1e-2}` + gradient clipping (`max_norm=1.0`)
+
+#### Why Subcarrier Inversion (Not Temporal Flip)
+
+The backbone routes CSI through a **Bidirectional LSTM** then **global temporal mean-pooling**:
+```
+BiLSTM:   forward h→, backward h←   at each timestep t
+z = mean_pool over t of [h→_t || h←_t]
+```
+When the time axis is flipped (`dims=[-2]`), the BiLSTM’s forward pass traces the original backward pass:
+```
+h→_t(x_rev) ≈ h←_t(x)   ⇒   z(x_rev) ≈ concat_swap(z(x))
+```
+After mean-pooling, `z(x_rev)` is near-identical in magnitude to `z(x)`, giving the rotation head zero discriminative signal — rotation loss plateaus at `ln(2) ≈ 0.693`.
+
+Subcarrier inversion (`dims=[-1]`) reverses the OFDM frequency-bin ordering (30 bins: low↔high). The CNN spatial blocks process this as a genuinely different spectral pattern; the resulting embedding `z_freq_inv` is maximally distinct from `z`, allowing the rotation head to learn a real binary classifier.
 
 ### Target Adaptation (CAPA-Fi)
 
@@ -441,7 +472,9 @@ Uncertainty-aware pseudo-label weighting ensures only confident samples drive th
 
 ### 4. Rotation SSL on Unlabeled Target Data
 
-180° temporal-frequency inversion is used as a self-supervised signal during adaptation — no labels required. The rotation head is updated jointly with the backbone.
+Subcarrier-axis frequency inversion (`flip(x, dims=[-1])`) is used as a self-supervised signal during both source training and target adaptation — no labels required. The rotation head is updated jointly with the backbone.
+
+> **Critical design choice**: Temporal-axis flip (`dims=[-2]`) is *not* used because the BiLSTM + global mean-pool architecture creates near-identical embeddings for time-reversed inputs, reducing the task to random guessing. Subcarrier inversion produces a genuinely distinct spectral pattern that the CNN processes differently, enabling a real discriminative signal.
 
 ### 5. Permutation-Invariant Multi-User Prediction
 
@@ -453,26 +486,29 @@ The Hungarian matcher and matched cross-entropy loss make the system fully invar
 
 `configs/default_config.yaml` governs all modules:
 
-| Section              | Key                     | Default  | Purpose                                  |
-|----------------------|-------------------------|----------|------------------------------------------|
-| `system`             | `seed`                  | 42       | Reproducibility                          |
-| `system`             | `device`                | `cuda`   | Compute device                           |
-| `data`               | `window_size_T`         | 3000     | CSI temporal window length               |
-| `data`               | `subcarriers_S`         | 30       | OFDM subcarrier count                    |
-| `data`               | `channels_C`            | 3        | Antenna channel pairs                    |
-| `model`              | `max_users_M`           | 6        | Concurrent user slots                    |
-| `model`              | `num_activity_classes_K`| 6        | Activity classes (excl. NO_PERSON)       |
-| `model`              | `latent_dim_D`          | 256      | Backbone output dimension                |
-| `model`              | `temporal_hidden_dim`   | 128      | BiLSTM hidden units per direction        |
-| `source_training`    | `lambda_rot_source`     | 0.5      | Source rotation SSL weight               |
-| `source_training`    | `learning_rate`         | 1e-3     | Source AdamW LR                          |
-| `adaptation`         | `method`                | `capa_fi`| Adaptation variant                       |
-| `adaptation`         | `lambda_ent`            | 1.0      | Entropy weight                           |
-| `adaptation`         | `lambda_div`            | 1.0      | Diversity weight                         |
-| `adaptation`         | `lambda_rot`            | 0.5      | Rotation SSL weight                      |
-| `adaptation`         | `tau_conf`              | 0.7      | Confidence threshold for EMA update      |
-| `adaptation`         | `ema_decay_beta`        | 0.9      | Category mask EMA smoothing factor       |
-| `adaptation`         | `learning_rate_backbone`| 1e-4     | Target adaptation LR                     |
+| Section              | Key                          | Default  | Purpose                                  |
+|----------------------|------------------------------|----------|------------------------------------------|
+| `system`             | `seed`                       | 42       | Reproducibility                          |
+| `system`             | `device`                     | `cuda`   | Compute device                           |
+| `data`               | `window_size_T`              | 3000     | CSI temporal window length               |
+| `data`               | `subcarriers_S`              | 30       | OFDM subcarrier count                    |
+| `data`               | `channels_C`                 | 3        | Antenna channel pairs                    |
+| `model`              | `max_users_M`                | 6        | Concurrent user slots                    |
+| `model`              | `num_activity_classes_K`     | 6        | Activity classes (excl. NO_PERSON)       |
+| `model`              | `latent_dim_D`               | 256      | Backbone output dimension                |
+| `model`              | `temporal_hidden_dim`        | 128      | BiLSTM hidden units per direction        |
+| `source_training`    | `lambda_rot_source`          | 0.5      | Source rotation SSL weight               |
+| `source_training`    | `learning_rate`              | 1e-3     | Backbone + classifier AdamW LR           |
+| `source_training`    | `learning_rate_rot_head`     | 1e-2     | Rotation head AdamW LR (10x backbone)    |
+| `source_training`    | `grad_clip_norm`             | 1.0      | Max gradient L2 norm (0 = disabled)      |
+| `adaptation`         | `method`                     | `capa_fi`| Adaptation variant                       |
+| `adaptation`         | `lambda_ent`                 | 1.0      | Entropy weight                           |
+| `adaptation`         | `lambda_div`                 | 1.0      | Diversity weight                         |
+| `adaptation`         | `lambda_rot`                 | 0.5      | Freq-inversion SSL weight                |
+| `adaptation`         | `grad_clip_norm`             | 1.0      | Max gradient L2 norm for adapt. step     |
+| `adaptation`         | `tau_conf`                   | 0.7      | Confidence threshold for EMA update      |
+| `adaptation`         | `ema_decay_beta`             | 0.9      | Category mask EMA smoothing factor       |
+| `adaptation`         | `learning_rate_backbone`     | 1e-4     | Target adaptation LR                     |
 
 ---
 
