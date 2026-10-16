@@ -9,12 +9,17 @@ Loads WiMANS CSI data and extracts M=6 target slots from source_split.csv:
 """
 
 import os
+from pathlib import Path
 from typing import Dict, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import DataLoader, Dataset
+
+from src.utils.download_data import download_wimans_dataset
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # WiMANS Activity to Class Index mapping
 # Config-defined 7 classes:
@@ -102,21 +107,33 @@ class MultiUserCSIDatasetWithPreprocessing(Dataset):
     def __init__(
         self,
         annotation_file: str,
-        data_dir: str = "data/processed/WiMANS",
+        data_dir: Optional[str] = None,
         fixed_length: int = 3000,
         num_slots: int = 6,
         in_channels: int = 3,
         subcarriers: int = 30,
+        auto_download: bool = True,
         transform=None,
     ):
         self.annotation_file = annotation_file
         self.annotations = pd.read_csv(annotation_file)
-        self.data_dir = data_dir
+
+        # Resolve dataset target path (defaulting to data/raw/WiMANS or data/processed/WiMANS)
+        if data_dir is None:
+            data_dir = str(PROJECT_ROOT / "data" / "raw" / "WiMANS")
+
+        self.data_dir = Path(data_dir)
         self.fixed_length = fixed_length
         self.num_slots = num_slots
         self.in_channels = in_channels
         self.subcarriers = subcarriers
         self.transform = transform
+
+        # Trigger auto-download if dataset directory is missing or contains no .npy files
+        if auto_download:
+            if not self.data_dir.exists() or len(list(self.data_dir.glob("*.npy"))) == 0:
+                print(f"[Dataset] Target directory {self.data_dir} empty or missing. Initiating download...")
+                download_wimans_dataset(target_dir=self.data_dir)
 
     def __len__(self) -> int:
         return len(self.annotations)
@@ -128,9 +145,9 @@ class MultiUserCSIDatasetWithPreprocessing(Dataset):
         # Target slots: [6]
         target_slots = extract_target_slots(row, num_slots=self.num_slots)
 
-        file_path = os.path.join(self.data_dir, f"{sample_name}.npy")
-        if os.path.isfile(file_path):
-            csi_tensor = np.load(file_path).astype(np.float32)  # Raw: [Time, Tx, Rx, Subcarriers]
+        file_path = self.data_dir / f"{sample_name}.npy"
+        if file_path.exists():
+            csi_tensor = np.load(str(file_path)).astype(np.float32)  # Raw: [Time, Tx, Rx, Subcarriers]
 
             # 1. Handle variable time lengths via padding or truncation to fixed_length (3000)
             current_length = csi_tensor.shape[0]
