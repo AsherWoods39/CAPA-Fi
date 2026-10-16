@@ -795,4 +795,3 @@ class TestEvaluationBenchmark:
         assert "occupancy_mae" in metrics
         assert Path("results/benchmark_partial_75.json").exists()
         assert Path("results/confusion_matrix_partial_75.png").exists()
-
