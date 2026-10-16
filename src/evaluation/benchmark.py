@@ -48,46 +48,84 @@ CLASS_NAMES = [
     "Pick-up",
 ]
 
-
 def plot_confusion_matrix(
-    y_true: np.ndarray,
-    y_pred: np.ndarray,
+    y_true: Union[torch.Tensor, np.ndarray],
+    y_pred: Union[torch.Tensor, np.ndarray],
     save_path: str = "results/confusion_matrix.png",
+    title: str = "CAPA-Fi Confusion Matrix",
+    num_classes: int = 7,
     class_names: Optional[List[str]] = None,
-    title: str = "CAPA-Fi Target Domain Confusion Matrix",
-) -> None:
+) -> plt.Figure:
     """
-    Renders and exports a normalized confusion matrix heatmap.
+    Plots and exports normalized confusion matrix across multi-slot predictions.
+    Flattens 3D probabilities/logits [B, M, K+1] or 2D class predictions [B, M]
+    into 1D arrays matching scikit-learn requirements.
     """
     if class_names is None:
-        class_names = CLASS_NAMES
+        class_names = [
+            "No-Person",
+            "Walk",
+            "Sit",
+            "Stand",
+            "Fall",
+            "Wave",
+            "Pick-up",
+        ]
 
-    num_classes = len(class_names)
-    cm = confusion_matrix(y_true, y_pred, labels=list(range(num_classes)))
-    # Row-normalized percentages
-    cm_norm = cm.astype("float") / (cm.sum(axis=1, keepdims=True) + 1e-8)
+    # Convert PyTorch tensors to NumPy arrays
+    if isinstance(y_true, torch.Tensor):
+        y_true = y_true.detach().cpu().numpy()
+    if isinstance(y_pred, torch.Tensor):
+        y_pred = y_pred.detach().cpu().numpy()
 
-    plt.figure(figsize=(8, 6))
+    # Convert 3D probabilities/logits [B, M, K+1] -> 2D discrete class labels [B, M]
+    if y_pred.ndim == 3:
+        y_pred = np.argmax(y_pred, axis=-1)
+
+    if y_true.ndim == 3:
+        # If y_true is passed as probabilities/logits, apply argmax over classes
+        if y_true.shape[-1] == num_classes or y_true.shape[-1] > 1:
+            y_true = np.argmax(y_true, axis=-1)
+        else:
+            y_true = y_true.squeeze(-1)
+
+    # Flatten 2D [B, M] multi-slot predictions into 1D [B * M] vectors for scikit-learn
+    y_true_flat = y_true.reshape(-1)
+    y_pred_flat = y_pred.reshape(-1)
+
+    # Compute normalized confusion matrix
+    cm = confusion_matrix(
+        y_true_flat,
+        y_pred_flat,
+        labels=list(range(num_classes)),
+        normalize="true"
+    )
+
+    # Plot figure using Seaborn
+    fig, ax = plt.subplots(figsize=(8, 6))
     sns.heatmap(
-        cm_norm,
+        cm,
         annot=True,
         fmt=".2f",
         cmap="Blues",
         xticklabels=class_names,
         yticklabels=class_names,
-        cbar_kws={"label": "Normalized Accuracy"},
+        ax=ax,
+        vmin=0.0,
+        vmax=1.0,
     )
-    plt.title(title, fontsize=12, fontweight="bold")
-    plt.xlabel("Predicted Activity Class", fontsize=10)
-    plt.ylabel("Ground Truth Class", fontsize=10)
+    ax.set_title(title, fontsize=14, fontweight="bold")
+    ax.set_xlabel("Predicted Category", fontsize=12)
+    ax.set_ylabel("Ground Truth Category", fontsize=12)
     plt.tight_layout()
 
-    out_file = Path(save_path)
-    out_file.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(str(out_file), dpi=300)
-    plt.close()
-    logger.info(f"Confusion matrix saved to {out_file}")
+    # Save figure artifact
+    out_path = Path(save_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
 
+    return fig
 
 def plot_tsne_embeddings(
     latents: np.ndarray,
@@ -227,6 +265,7 @@ def export_latex_table(
         f.write(table_content)
     logger.info(f"LaTeX comparison table exported to {out_file}")
     return table_content
+
 def run_benchmark(
     config: Optional[Dict] = None,
     protocol: str = "partial_75",
@@ -298,23 +337,13 @@ def run_benchmark(
     # Perform Hungarian bipartite matching to align slot predictions with targets
     matched_preds, matched_targets = match_slots_hungarian(logits, target_slots)
     cm_path = f"results/confusion_matrix_{protocol}.png"
-
-    # Call plot_confusion_matrix with positional arguments or matched predictions
-    try:
-        plot_confusion_matrix(
-            matched_preds,
-            matched_targets,
-            save_path=cm_path,
-            title=f"CAPA-Fi Confusion Matrix ({protocol.upper()})"
-        )
-    except TypeError:
-        # Fallback if plot_confusion_matrix accepts preds/targets keyword args
-        plot_confusion_matrix(
-            preds=matched_preds,
-            targets=matched_targets,
-            save_path=cm_path,
-            title=f"CAPA-Fi Confusion Matrix ({protocol.upper()})"
-        )
+    
+    plot_confusion_matrix(
+        y_true=matched_targets,
+        y_pred=matched_preds,
+        save_path=cm_path,
+        title=f"CAPA-Fi Confusion Matrix ({protocol.upper()})"
+    )
 
     # 7. Comparative Benchmarking against Seminar Papers & Baselines
     comparisons = {
