@@ -1,7 +1,5 @@
 """
 CAPA-Fi: Target Adaptation Engine Runner & Verification Pipeline
-Location: src/adaptation/run_adaptation.py
-Role: Member 3 (Source-Free Adaptation & SSL Engine Lead: Athishta P. A.)
 
 Executes:
 1. Ingestion of configs/default_config.yaml

@@ -1,5 +1,5 @@
 """
-CAPA-Fi: Source Domain Pre-Training Script (Member 2)
+CAPA-Fi: Source Domain Pre-Training Script
 
 End-to-end supervised training with Hungarian matching + rotation SSL.
 

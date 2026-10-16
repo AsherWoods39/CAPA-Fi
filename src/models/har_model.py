@@ -1,5 +1,5 @@
 """
-CAPA-Fi: Unified HAR Model Wrapper (Member 2)
+CAPA-Fi: Unified HAR Model Wrapper
 
 Wires backbone + classifier + rotation_head into a single nn.Module.
 This is a DROP-IN REPLACEMENT for MockHARModel in src/adaptation/mock_inputs.py.

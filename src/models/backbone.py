@@ -1,5 +1,5 @@
 """
-CAPA-Fi: Spatial-Temporal Feature Encoder Backbone (Member 2)
+CAPA-Fi: Spatial-Temporal Feature Encoder Backbone
 
 Architecture:
     CSI [B, 3, 3000, 30]

@@ -1,5 +1,5 @@
 """
-CAPA-Fi: Evaluation Metrics Module (Member 4 - Fathima Bushara M. C.)
+CAPA-Fi: Evaluation Metrics Module
 
 Provides comprehensive evaluation metrics for multi-user Wi-Fi HAR:
     1. Hungarian Matcher for Permutation-Invariant Multi-Slot Evaluation

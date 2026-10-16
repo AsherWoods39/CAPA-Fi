@@ -57,8 +57,8 @@ class CategoryMaskEngine:
         self.beta = beta
         self.tau_thresh = tau_thresh
         self.tau_temp = tau_temp
-        # Initialize with zeros (assume all absent until proven otherwise)
-        self.mu = torch.zeros(num_classes)
+        # Warm-start assuming all classes present (mu = 1.0)
+        self.mu = torch.ones(num_classes)
     
     def update_and_compute(self, probs: torch.Tensor, w_i: torch.Tensor, tau_conf: float = 0.65) -> torch.Tensor:
         """

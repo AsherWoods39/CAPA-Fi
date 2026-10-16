@@ -1,5 +1,5 @@
 """
-CAPA-Fi: Matched Cross-Entropy Loss (Member 2)
+CAPA-Fi: Matched Cross-Entropy Loss
 
 Computes permutation-invariant classification loss by:
 1. Using the Hungarian matcher's assignment to reorder predictions (or targets)

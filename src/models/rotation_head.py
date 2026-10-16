@@ -1,5 +1,5 @@
 """
-CAPA-Fi: Binary Rotation SSL Head (Member 2)
+CAPA-Fi: Binary Rotation SSL Head
 
 Maps latent embedding z [B, D] → binary rotation logits [B, 2].
 Predicts whether the input CSI was original (label 0) or 180°-inverted (label 1).

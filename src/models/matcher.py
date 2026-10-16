@@ -1,5 +1,5 @@
 """
-CAPA-Fi: Hungarian Bipartite Matcher (Member 2)
+CAPA-Fi: Hungarian Bipartite Matcher
 
 Finds the optimal assignment between predicted slots and ground-truth slots
 using the Hungarian algorithm (scipy.optimize.linear_sum_assignment).

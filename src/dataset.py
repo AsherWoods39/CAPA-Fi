@@ -1,5 +1,5 @@
 """
-CAPA-Fi: Multi-User CSI Dataset with Preprocessing (Member 1 / Member 2)
+CAPA-Fi: Multi-User CSI Dataset with Preprocessing
 
 Loads WiMANS CSI data and extracts M=6 target slots from source_split.csv:
     x:            [C, T, S] = [3, 3000, 30]
