@@ -99,7 +99,7 @@ adaptation:
 
   # Category-Aware Dynamic Filtering Mask (γ_k)
   enable_category_filtering: true # Novel CAPA-Fi negative-transfer mitigation
-  tau_conf: 0.40 # Updated: Lower confidence threshold enables early pseudo-evidence updates
+  tau_conf: 0.15 # Updated: Lower confidence threshold enables early pseudo-evidence updates
   tau_thresh: 0.05 # Updated: Marginal presence cutoff threshold
   tau_temp: 0.04 # Sigmoidal mask temperature parameter
   ema_decay_beta: 0.90 # Exponential moving average smoothing factor

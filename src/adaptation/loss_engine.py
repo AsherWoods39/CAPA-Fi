@@ -63,26 +63,4 @@ def compute_rotation_loss(rot_logits_0: torch.Tensor, rot_logits_180: torch.Tens
 
     return (loss_0 + loss_180) / 2.0
 
-class CAPAFiLossEngine(nn.Module):
-    def __init__(self, lambda_ent=1.0, lambda_div=0.5, lambda_rot=0.5):
-        super().__init__()
-        self.lambda_ent = lambda_ent
-        self.lambda_div = lambda_div
-        self.lambda_rot = lambda_rot
-
-    def forward(self, logits, rot_logits_0, rot_logits_180, w_i, gamma_k, p_occ):
-        probs = compute_probs(logits)
-        loss_ent = compute_entropy_loss(probs, w_i)
-        loss_div = compute_masked_diversity_loss(probs, gamma_k, p_occ)
-        loss_rot = compute_rotation_loss(rot_logits_0, rot_logits_180)
-        loss_total = (self.lambda_ent * loss_ent - self.lambda_div * loss_div + self.lambda_rot * loss_rot)
-
-        return {
-            "loss_total": loss_total,
-            "loss_entropy": loss_ent.detach(),
-            "loss_diversity": loss_div.detach(),
-            "loss_rotation": loss_rot.detach(),
-            "mean_confidence": w_i.mean().item(),
-            "active_classes_count": (gamma_k > 0.5).sum().item(),
-            "occupancy_factor": p_occ.mean().item(),
-        }
+from src.adaptation.loss import CAPAFiLossEngine

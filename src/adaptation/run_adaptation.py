@@ -74,7 +74,8 @@ def get_target_dataloader(config: dict) -> DataLoader:
             ds = MultiUserCSIDatasetWithPreprocessing(
                 annotation_file=str(splits_csv),
                 data_dir=str(data_dir),
-                fixed_length=config["time_steps"]
+                fixed_length=config["time_steps"],
+                auto_download=False,
             )
             if len(ds) > 0:
                 # Test read of first element to verify .npy availability

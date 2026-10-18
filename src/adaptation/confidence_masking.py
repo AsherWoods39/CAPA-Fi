@@ -45,52 +45,8 @@ def compute_occupancy(probs: torch.Tensor) -> torch.Tensor:
     p_occ = 1.0 - p_bg.mean(dim=-1) # (B,)
     return p_occ
 
-class CategoryMaskEngine:
-    """
-    Maintains an EMA-smoothed estimate of which classes are present in the target domain.
-    
-    State:
-        mu_k: (K,) — smoothed class presence score (0 = absent, 1 = always present)
-    """
-    def __init__(self, num_classes: int, beta: float = 0.9, tau_thresh: float = 0.05, tau_temp: float = 0.04):
-        self.num_classes = num_classes
-        self.beta = beta
-        self.tau_thresh = tau_thresh
-        self.tau_temp = tau_temp
-        # Warm-start assuming all classes present (mu = 1.0)
-        self.mu = torch.ones(num_classes)
-    
-    def update_and_compute(self, probs: torch.Tensor, w_i: torch.Tensor, tau_conf: float = 0.65) -> torch.Tensor:
-        """
-        probs: (B, M, K+1)   w_i: (B,)
-        returns: gamma_k (K,) — soft mask in [0, 1]
-        
-        Steps:
-        1. For each active class k in {1,...,K}, compute confidence-weighted average
-        2. Update EMA: mu_k = beta * mu_k + (1-beta) * p_bar_k
-        3. Apply sigmoid: gamma_k = sigmoid((mu_k - tau_thresh) / tau_temp)
-        """
-        B, M, K_plus_1 = probs.shape
-        # Extract only activity class probs (skip class 0 = background)
-        act_probs = probs[:, :, 1:]
-        # Confidence gate: only use samples where w_i >= tau_conf
-        conf_mask =(w_i >= tau_conf).float()                    # (B, )
-        mask_expanded = conf_mask.unsqueeze(-1).unsqueeze(-1)   # (B, 1, 1)
-        # Weighted average per class: p_bar_k = Σ_{i,m} p_{i,m,k} * I(w_i >= tau) / Σ I(w_i >= tau)
-        conf_slots = conf_mask.unsqueeze(-1).expand(B, M)  # (B, M)
-        conf_count = conf_slots.sum()
-        
-        # Only update running prevalence statistics if confident evidence exists in batch
-        if conf_count > 0:
-            nm = (act_probs * mask_expanded).sum(dim=[0, 1])
-            p_bar = nm / conf_count  # (K, )
-            with torch.no_grad():
-                self.mu.copy_(self.beta * self.mu + (1.0 - self.beta) * p_bar.detach().cpu())
-        
-        # Sigmoid gating: smooth transition around tau_thresh
-        mu_device = self.mu.to(probs.device)
-        gamma_k = torch.sigmoid((mu_device - self.tau_thresh) / self.tau_temp)
-        return gamma_k
+from src.adaptation.masking import CategoryMaskEngine
+
 
 def compute_weights_and_masks(
     logits: torch.Tensor,

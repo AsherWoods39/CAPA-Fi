@@ -7,6 +7,7 @@ from torch.utils.data import DataLoader
 
 from src.adaptation.confidence_masking import (
     CategoryMaskEngine,
+    compute_occupancy,
     compute_probs,
     compute_sample_confidence,
     compute_weights_and_masks,
@@ -98,15 +99,14 @@ class TargetAdaptationTrainer:
         )
         
         # Masking engine (stateful)
-        num_classes = int(config.get("num_classes", config.get("num_activity_classes_K", 6)))
+        num_classes = int(config.get("total_classes", config.get("num_classes", 7)))
         self.num_classes = num_classes
-        self.tau_conf = float(config.get("tau_conf", 0.65))
+        self.tau_conf = float(config.get("tau_conf", 0.15))
         
         self.mask_engine = CategoryMaskEngine(
             num_classes=num_classes,
-            beta=float(config.get("ema_decay_beta", 0.90)),
-            tau_thresh=float(config.get("tau_thresh", config.get("tau_presence", 0.05))),
-            tau_temp=float(config.get("tau_temp", 0.04)),
+            tau_conf=self.tau_conf,
+            momentum=float(config.get("ema_decay_beta", config.get("momentum", 0.90))),
         )
         
         self.last_epoch_metrics: Dict[str, float] = {}
@@ -160,9 +160,15 @@ class TargetAdaptationTrainer:
             rot_logits_180 = self.model.forward_rotation(z_180)
             
             # Compute masks and weights
-            w_i, gamma_k, p_occ = compute_weights_and_masks(
-                logits, self.mask_engine, tau_conf=self.tau_conf
-            )
+            if hasattr(self.mask_engine, "update_mask"):
+                gamma_k, mean_conf = self.mask_engine.update_mask(logits)
+                w_i = compute_sample_confidence(compute_probs(logits), tau_conf=self.tau_conf)
+                p_occ = compute_occupancy(compute_probs(logits))
+            else:
+                w_i, gamma_k, p_occ = compute_weights_and_masks(
+                    logits, self.mask_engine, tau_conf=self.tau_conf
+                )
+                mean_conf = w_i.mean()
             
             # Apply ablation / baseline overrides if specified
             if not self.enable_category_filtering:
@@ -170,14 +176,28 @@ class TargetAdaptationTrainer:
             if not self.enable_occupancy:
                 p_occ = torch.ones_like(p_occ)
             
+            # Format rotation SSL inputs
+            B = rot_logits_0.shape[0]
+            rot_logits = torch.cat([rot_logits_0, rot_logits_180], dim=0)
+            rot_targets = torch.cat([
+                torch.zeros(B, dtype=torch.long, device=rot_logits_0.device),
+                torch.ones(B, dtype=torch.long, device=rot_logits_180.device),
+            ], dim=0)
+            
             # Compute loss
             loss_dict = self.loss_engine(
-                logits, rot_logits_0, rot_logits_180, w_i, gamma_k, p_occ
+                logits=logits,
+                rot_logits=rot_logits,
+                rot_targets=rot_targets,
+                category_mask=gamma_k,
+                occupancy_weight=p_occ if self.enable_occupancy else None,
             )
+            
+            total_loss_val = loss_dict.get("loss_total", loss_dict["loss"])
             
             # Backward pass, gradient clip & optimization step
             self.optimizer.zero_grad()
-            loss_dict["loss_total"].backward()
+            total_loss_val.backward()
             torch.nn.utils.clip_grad_norm_(
                 [p for p in self.model.parameters() if p.requires_grad],
                 max_norm=1.0,
@@ -185,14 +205,17 @@ class TargetAdaptationTrainer:
             self.optimizer.step()
             
             # Accumulate telemetry
+            active_cnt = (gamma_k[1:] > 0.5).sum().item() if gamma_k.shape[0] == 7 else (gamma_k > 0.5).sum().item()
+            conf_val = float(mean_conf.item() if hasattr(mean_conf, "item") else mean_conf)
+            
             batch_count += 1
-            running_totals["loss_total"] += loss_dict["loss_total"].item()
-            running_totals["loss_entropy"] += loss_dict["loss_entropy"].item()
-            running_totals["loss_diversity"] += loss_dict["loss_diversity"].item()
-            running_totals["loss_rotation"] += loss_dict["loss_rotation"].item()
-            running_totals["mean_confidence"] += float(loss_dict["mean_confidence"])
-            running_totals["active_classes_count"] += float(loss_dict["active_classes_count"])
-            running_totals["occupancy_factor"] += float(loss_dict["occupancy_factor"])
+            running_totals["loss_total"] += total_loss_val.item()
+            running_totals["loss_entropy"] += loss_dict.get("loss_entropy", loss_dict["loss_ent"]).item()
+            running_totals["loss_diversity"] += loss_dict.get("loss_diversity", loss_dict["loss_div"]).item()
+            running_totals["loss_rotation"] += loss_dict.get("loss_rotation", loss_dict["loss_rot"]).item()
+            running_totals["mean_confidence"] += conf_val
+            running_totals["active_classes_count"] += float(active_cnt)
+            running_totals["occupancy_factor"] += float(p_occ.mean().item())
         
         num_batches = max(batch_count, 1)
         epoch_averages = {k: v / num_batches for k, v in running_totals.items()}
