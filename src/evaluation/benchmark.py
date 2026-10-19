@@ -221,6 +221,260 @@ def plot_loss_curves(
     logger.info(f"Loss curves saved to {out_file}")
 
 
+def format_terminal_table(
+    benchmark_results: Dict[str, Dict[str, Union[float, str]]],
+    protocol: str = "partial_75",
+) -> str:
+    """
+    Formats comparative benchmark results into a clean, human-readable terminal table
+    without generating external auxiliary files.
+    """
+    headers = [
+        "Method / Paper",
+        "Slot-Acc (%)",
+        "Active-Acc (%)",
+        "Macro F1",
+        "Occ MAE",
+        "SFUDA",
+        "Partial-Set",
+    ]
+    rows = []
+    for method, metrics in benchmark_results.items():
+        clean_method = method.replace(r"\textbf{", "").replace("}", "")
+        slot_acc = f"{metrics.get('slot_wise_accuracy', 0.0) * 100:.2f}%"
+        active_acc = f"{metrics.get('active_slot_accuracy', 0.0) * 100:.2f}%"
+        macro_f1 = f"{metrics.get('macro_f1', 0.0):.4f}"
+        occ_mae = f"{metrics.get('occupancy_mae', 0.0):.3f}"
+        sfuda = str(metrics.get("sfuda", "Yes"))
+        partial = str(metrics.get("partial_set", "No"))
+        rows.append([clean_method, slot_acc, active_acc, macro_f1, occ_mae, sfuda, partial])
+
+    col_widths = [len(h) for h in headers]
+    for row in rows:
+        for i, val in enumerate(row):
+            col_widths[i] = max(col_widths[i], len(val))
+
+    sep = "+" + "+".join(["-" * (w + 2) for w in col_widths]) + "+"
+    header_line = "| " + " | ".join([headers[i].ljust(col_widths[i]) for i in range(len(headers))]) + " |"
+
+    title = f"  CAPA-Fi Comparative Benchmark Summary (Protocol: {protocol.upper()})  "
+    table_width = len(sep)
+    border = "=" * table_width
+
+    lines = [
+        "",
+        border,
+        title.center(table_width),
+        border,
+        sep,
+        header_line,
+        sep,
+    ]
+    for row in rows:
+        row_str = "| " + " | ".join([row[i].ljust(col_widths[i]) for i in range(len(row))]) + " |"
+        lines.append(row_str)
+    lines.append(sep)
+    lines.append(border)
+    lines.append("")
+
+    return "\n".join(lines)
+
+
+def plot_benchmark_summary(
+    y_true: Union[torch.Tensor, np.ndarray],
+    y_pred: Union[torch.Tensor, np.ndarray],
+    comparisons: Dict[str, Dict[str, Union[float, str]]],
+    save_path: str = "results/benchmark_partial_75.png",
+    protocol: str = "partial_75",
+    history_json_path: str = "results/adaptation_history.json",
+    num_classes: int = 7,
+    class_names: Optional[List[str]] = None,
+) -> plt.Figure:
+    """
+    Generates a unified single .png file containing a 2x2 grid of publication-quality subplots:
+      - Subplot 1 (Top-Left):     Normalized Multi-Slot Confusion Matrix Heatmap
+      - Subplot 2 (Top-Right):    Benchmark Accuracy & F1 Comparison across Paradigms
+      - Subplot 3 (Bottom-Left):  Occupancy Estimation MAE across Adaptation Paradigms
+      - Subplot 4 (Bottom-Right): Adaptation Convergence Loss Curves & Confidence Telemetry
+                                  (or Target Class Activity Support Distribution fallback)
+    """
+    if class_names is None:
+        class_names = CLASS_NAMES
+
+    if isinstance(y_true, torch.Tensor):
+        y_true = y_true.detach().cpu().numpy()
+    if isinstance(y_pred, torch.Tensor):
+        y_pred = y_pred.detach().cpu().numpy()
+
+    if y_pred.ndim == 3:
+        y_pred = np.argmax(y_pred, axis=-1)
+    if y_true.ndim == 3:
+        if y_true.shape[-1] == num_classes or y_true.shape[-1] > 1:
+            y_true = np.argmax(y_true, axis=-1)
+        else:
+            y_true = y_true.squeeze(-1)
+
+    y_true_flat = y_true.reshape(-1)
+    y_pred_flat = y_pred.reshape(-1)
+
+    cm = confusion_matrix(
+        y_true_flat,
+        y_pred_flat,
+        labels=list(range(num_classes)),
+        normalize="true",
+    )
+
+    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+    fig.suptitle(
+        f"CAPA-Fi Target Domain Benchmark & Evaluation Report ({protocol.upper()})",
+        fontsize=16,
+        fontweight="bold",
+        y=0.98,
+    )
+
+    # 1. Confusion Matrix Heatmap
+    ax_cm = axes[0, 0]
+    sns.heatmap(
+        cm,
+        annot=True,
+        fmt=".2f",
+        cmap="Blues",
+        xticklabels=class_names,
+        yticklabels=class_names,
+        ax=ax_cm,
+        vmin=0.0,
+        vmax=1.0,
+        cbar_kws={"label": "Normalized Accuracy"},
+    )
+    ax_cm.set_title("Multi-Slot Activity Confusion Matrix", fontsize=12, fontweight="bold")
+    ax_cm.set_xlabel("Predicted Activity Category", fontsize=10)
+    ax_cm.set_ylabel("Ground Truth Category", fontsize=10)
+    ax_cm.tick_params(axis="x", rotation=30)
+
+    # 2. Paradigm Performance Comparison
+    ax_perf = axes[0, 1]
+    methods = []
+    slot_accs = []
+    active_accs = []
+    macro_f1s = []
+
+    for m, vals in comparisons.items():
+        clean_name = m.replace(r"\textbf{", "").replace("}", "")
+        if "Liang" in clean_name:
+            clean_name = "SHOT"
+        elif "Yan" in clean_name:
+            clean_name = "WiFi-SFGADR"
+        elif "Cao" in clean_name:
+            clean_name = "SAN"
+        elif "Wu" in clean_name:
+            clean_name = "Partial-SFUDA"
+        elif "MU-SHOT" in clean_name:
+            clean_name = "MU-SHOT-Fi"
+        elif "CAPA-Fi" in clean_name:
+            clean_name = "CAPA-Fi (Ours)"
+
+        methods.append(clean_name)
+        slot_accs.append(vals.get("slot_wise_accuracy", 0.0) * 100)
+        active_accs.append(vals.get("active_slot_accuracy", 0.0) * 100)
+        macro_f1s.append(vals.get("macro_f1", 0.0) * 100)
+
+    x = np.arange(len(methods))
+    width = 0.26
+
+    ax_perf.bar(x - width, slot_accs, width, label="Slot-Wise Acc (%)", color="#1f77b4", alpha=0.9)
+    ax_perf.bar(x, active_accs, width, label="Active Slot Acc (%)", color="#2ca02c", alpha=0.9)
+    ax_perf.bar(x + width, macro_f1s, width, label="Macro F1 (x100)", color="#ff7f0e", alpha=0.9)
+
+    ax_perf.set_title("Domain Adaptation Paradigm Comparison", fontsize=12, fontweight="bold")
+    ax_perf.set_xticks(x)
+    ax_perf.set_xticklabels(methods, rotation=25, ha="right", fontsize=9)
+    ax_perf.set_ylabel("Score (%)", fontsize=10)
+    ax_perf.set_ylim(0, 105)
+    ax_perf.legend(loc="upper left", fontsize=9)
+    ax_perf.grid(axis="y", linestyle="--", alpha=0.4)
+
+    for tick in ax_perf.get_xticklabels():
+        if "CAPA-Fi" in tick.get_text():
+            tick.set_fontweight("bold")
+            tick.set_color("#d62728")
+
+    # 3. Occupancy MAE Comparison (Lower is Better)
+    ax_occ = axes[1, 0]
+    occ_maes = [vals.get("occupancy_mae", 0.0) for vals in comparisons.values()]
+    colors = ["#4c72b0" if "CAPA-Fi" not in m else "#2ca02c" for m in methods]
+
+    bars_occ = ax_occ.barh(methods, occ_maes, color=colors, height=0.55, alpha=0.88)
+    ax_occ.set_title("Multi-User Occupancy Estimation MAE (Lower is Better)", fontsize=12, fontweight="bold")
+    ax_occ.set_xlabel("Mean Absolute Error (Persons)", fontsize=10)
+    ax_occ.grid(axis="x", linestyle="--", alpha=0.4)
+    for bar in bars_occ:
+        width_val = bar.get_width()
+        ax_occ.text(
+            width_val + 0.015,
+            bar.get_y() + bar.get_height() / 2,
+            f"{width_val:.3f}",
+            va="center",
+            fontsize=9,
+            fontweight="bold" if width_val == min(occ_maes) else "normal",
+        )
+    ax_occ.set_xlim(0, max(occ_maes) * 1.25)
+
+    # 4. Convergence Curves or Class Support Distribution
+    ax_conv = axes[1, 1]
+    has_history = os.path.isfile(history_json_path)
+
+    if has_history:
+        try:
+            with open(history_json_path, "r") as f:
+                history = json.load(f)
+            epochs = range(1, len(history.get("loss_total", [])) + 1)
+            if len(epochs) > 0:
+                ax_conv.plot(epochs, history.get("loss_total", []), "b-", label="Total Loss", linewidth=2)
+                ax_conv.plot(epochs, history.get("loss_entropy", []), "g--", label="Entropy Loss", linewidth=1.8)
+                ax_conv.plot(epochs, history.get("loss_diversity", []), "r-.", label="Diversity Loss", linewidth=1.8)
+                ax_conv.set_title("Target Adaptation Loss Convergence Telemetry", fontsize=12, fontweight="bold")
+                ax_conv.set_xlabel("Adaptation Epoch", fontsize=10)
+                ax_conv.set_ylabel("Objective Loss", fontsize=10)
+                ax_conv.legend(loc="upper right", fontsize=9)
+                ax_conv.grid(True, linestyle="--", alpha=0.4)
+
+                if "mean_confidence" in history and any(history.get("mean_confidence", [])):
+                    ax_twin = ax_conv.twinx()
+                    ax_twin.plot(epochs, history.get("mean_confidence", []), "m:", label="Confidence w_i", linewidth=2)
+                    ax_twin.set_ylabel("Confidence w_i", fontsize=10, color="purple")
+                    ax_twin.tick_params(axis="y", labelcolor="purple")
+                    ax_twin.set_ylim(0.0, 1.05)
+            else:
+                has_history = False
+        except Exception:
+            has_history = False
+
+    if not has_history:
+        counts_true = np.bincount(y_true_flat, minlength=num_classes)
+        counts_pred = np.bincount(y_pred_flat, minlength=num_classes)
+        indices = np.arange(num_classes)
+        bw = 0.35
+
+        ax_conv.bar(indices - bw / 2, counts_true, bw, label="Ground Truth Support", color="#4c72b0", alpha=0.85)
+        ax_conv.bar(indices + bw / 2, counts_pred, bw, label="Predicted Support", color="#55a868", alpha=0.85)
+        ax_conv.set_title("Category Support Distribution (GT vs Predictions)", fontsize=12, fontweight="bold")
+        ax_conv.set_xticks(indices)
+        ax_conv.set_xticklabels(class_names, rotation=30, ha="right", fontsize=9)
+        ax_conv.set_ylabel("Slot Sample Count", fontsize=10)
+        ax_conv.legend(loc="upper right", fontsize=9)
+        ax_conv.grid(axis="y", linestyle="--", alpha=0.4)
+
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+
+    out_file = Path(save_path)
+    out_file.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_file, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    logger.info(f"Consolidated benchmark subplots saved to {out_file}")
+
+    return fig
+
+
 def export_latex_table(
     benchmark_results: Dict[str, Dict[str, Union[float, str]]],
     save_path: str = "results/benchmark_table.tex",
@@ -266,14 +520,18 @@ def export_latex_table(
     logger.info(f"LaTeX comparison table exported to {out_file}")
     return table_content
 
+
 def run_benchmark(
     config: Optional[Dict] = None,
     protocol: str = "partial_75",
     model_checkpoint: Optional[str] = None,
     num_eval_samples: int = 64,
+    export_latex: bool = False,
 ) -> Dict[str, float]:
     """
     Executes benchmark evaluation on target data.
+    Prints comparative results table to terminal directly, without writing .tex files,
+    and produces a single consolidated .png figure of subplots in results/.
     """
     logger.info(f"Running benchmark evaluation under protocol: {protocol}")
 
@@ -333,17 +591,8 @@ def run_benchmark(
     with open(results_path, "w") as f:
         json.dump(metrics, f, indent=2)
 
-    # 6. Extract predictions for Confusion Matrix Plotting
-    # Perform Hungarian bipartite matching to align slot predictions with targets
+    # 6. Extract predictions for Plotting
     matched_preds, matched_targets = match_slots_hungarian(logits, target_slots)
-    cm_path = f"results/confusion_matrix_{protocol}.png"
-    
-    plot_confusion_matrix(
-        y_true=matched_targets,
-        y_pred=matched_preds,
-        save_path=cm_path,
-        title=f"CAPA-Fi Confusion Matrix ({protocol.upper()})"
-    )
 
     # 7. Comparative Benchmarking against Seminar Papers & Baselines
     comparisons = {
@@ -394,7 +643,33 @@ def run_benchmark(
         },
     }
 
-    export_latex_table(comparisons, save_path=f"results/benchmark_table_{protocol}.tex")
+    # Display comparison table directly in terminal
+    terminal_table_str = format_terminal_table(comparisons, protocol=protocol)
+    print(terminal_table_str)
+
+    # Export unified single .png file of subplots
+    benchmark_plot_path = f"results/benchmark_{protocol}.png"
+    plot_benchmark_summary(
+        y_true=matched_targets,
+        y_pred=matched_preds,
+        comparisons=comparisons,
+        save_path=benchmark_plot_path,
+        protocol=protocol,
+    )
+
+    # Also save/copy to confusion_matrix_{protocol}.png for backwards compatibility
+    cm_path = f"results/confusion_matrix_{protocol}.png"
+    plot_confusion_matrix(
+        y_true=matched_targets,
+        y_pred=matched_preds,
+        save_path=cm_path,
+        title=f"CAPA-Fi Confusion Matrix ({protocol.upper()})",
+    )
+
+    # Only export LaTeX table if explicitly requested (disabled by default)
+    if export_latex:
+        export_latex_table(comparisons, save_path=f"results/benchmark_table_{protocol}.tex")
+
     return metrics
 
 
@@ -427,12 +702,19 @@ def main():
         default=64,
         help="Number of evaluation samples",
     )
+    parser.add_argument(
+        "--export-latex",
+        action="store_true",
+        default=False,
+        help="Export comparison table as a .tex LaTeX file (default: False, printed to terminal only)",
+    )
     args = parser.parse_args()
 
     run_benchmark(
         protocol=args.protocol,
         model_checkpoint=args.checkpoint,
         num_eval_samples=args.samples,
+        export_latex=args.export_latex,
     )
 
 

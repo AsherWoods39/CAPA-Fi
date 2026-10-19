@@ -71,6 +71,8 @@ from src.evaluation.benchmark import (
     plot_confusion_matrix,
     plot_tsne_embeddings,
     plot_loss_curves,
+    plot_benchmark_summary,
+    format_terminal_table,
     export_latex_table,
     run_benchmark,
 )
@@ -813,10 +815,47 @@ class TestEvaluationBenchmark:
         assert r"\begin{tabular}" in content
         assert "CAPA-Fi" in content
 
+    def test_format_terminal_table(self):
+        dummy_results = {
+            "Baseline": {"slot_wise_accuracy": 0.5, "active_slot_accuracy": 0.4, "macro_f1": 0.45, "occupancy_mae": 1.2, "sfuda": "Yes", "partial_set": "No"},
+            r"\textbf{CAPA-Fi}": {"slot_wise_accuracy": 0.85, "active_slot_accuracy": 0.80, "macro_f1": 0.82, "occupancy_mae": 0.3, "sfuda": "Yes", "partial_set": "Yes"},
+        }
+        output = format_terminal_table(dummy_results, protocol="partial_75")
+        assert "CAPA-Fi" in output
+        assert "Baseline" in output
+        assert "Slot-Acc (%)" in output
+        assert "85.00%" in output
+        assert r"\textbf{" not in output  # Clean terminal formatting
+
+    def test_plot_benchmark_summary(self, tmp_path):
+        y_true = torch.randint(0, 7, (8, 6))
+        y_pred = torch.randint(0, 7, (8, 6))
+        dummy_comparisons = {
+            "Baseline": {"slot_wise_accuracy": 0.5, "active_slot_accuracy": 0.4, "macro_f1": 0.45, "occupancy_mae": 1.2},
+            "CAPA-Fi (Ours)": {"slot_wise_accuracy": 0.85, "active_slot_accuracy": 0.80, "macro_f1": 0.82, "occupancy_mae": 0.3},
+        }
+        out_png = str(tmp_path / "benchmark_summary.png")
+        fig = plot_benchmark_summary(
+            y_true=y_true,
+            y_pred=y_pred,
+            comparisons=dummy_comparisons,
+            save_path=out_png,
+            protocol="partial_75",
+        )
+        assert Path(out_png).exists()
+        assert Path(out_png).stat().st_size > 0
+
     def test_run_benchmark_smoke(self, tmp_path):
         # Smoke test running benchmark under partial_75 with small sample size
+        # Clean up any leftover tex file from earlier manual runs
+        tex_path = Path("results/benchmark_table_partial_75.tex")
+        if tex_path.exists():
+            tex_path.unlink()
+
         metrics = run_benchmark(protocol="partial_75", num_eval_samples=8)
         assert "slot_wise_accuracy" in metrics
         assert "occupancy_mae" in metrics
         assert Path("results/benchmark_partial_75.json").exists()
+        assert Path("results/benchmark_partial_75.png").exists()
         assert Path("results/confusion_matrix_partial_75.png").exists()
+        assert not Path("results/benchmark_table_partial_75.tex").exists()
