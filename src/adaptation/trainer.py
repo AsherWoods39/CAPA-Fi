@@ -107,6 +107,8 @@ class TargetAdaptationTrainer:
             num_classes=num_classes,
             tau_conf=self.tau_conf,
             momentum=float(config.get("ema_decay_beta", config.get("momentum", 0.90))),
+            tau_thresh=float(config.get("tau_thresh", 0.05)),
+            tau_temp=float(config.get("tau_temp", 0.04)),
         ).to(self.device)
         
         self.last_epoch_metrics: Dict[str, float] = {}
@@ -264,8 +266,13 @@ class TargetAdaptationTrainer:
             print(f"  Category Filtering: {self.enable_category_filtering} | Occ Gating: {self.enable_occupancy}")
             print(f"=======================================================\n")
         
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            self.optimizer, T_max=total_epochs, eta_min=1e-6
+        )
+
         for ep in range(1, total_epochs + 1):
             epoch_loss = self.adapt_epoch(target_loader)
+            scheduler.step()
             metrics = epoch_loss.metrics
             
             history["epoch"].append(ep)
@@ -274,6 +281,7 @@ class TargetAdaptationTrainer:
                     history[k].append(metrics[k])
             
             if verbose:
+                current_lr = self.optimizer.param_groups[0]["lr"]
                 print(
                     f"Epoch [{ep:02d}/{total_epochs:02d}] "
                     f"Loss: {metrics['loss_total']:.4f} | "
@@ -281,7 +289,8 @@ class TargetAdaptationTrainer:
                     f"Div: {metrics['loss_diversity']:.4f} | "
                     f"Rot: {metrics['loss_rotation']:.4f} | "
                     f"Conf: {metrics['mean_confidence']:.3f} | "
-                    f"Active: {metrics['active_classes_count']:.1f}"
+                    f"Active: {metrics['active_classes_count']:.1f} | "
+                    f"LR: {current_lr:.2e}"
                 )
         
         # Save adapted checkpoint if path specified

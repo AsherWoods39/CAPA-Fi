@@ -50,11 +50,21 @@ from typing import Optional
 
 
 class CategoryMaskEngine(nn.Module):
-    def __init__(self, num_classes: int = 7, tau_conf: float = 0.15, momentum: float = 0.9, **kwargs):
+    def __init__(
+        self,
+        num_classes: int = 7,
+        tau_conf: float = 0.15,
+        momentum: float = 0.9,
+        tau_thresh: float = 0.05,
+        tau_temp: float = 0.04,
+        **kwargs,
+    ):
         super().__init__()
         self.num_classes = num_classes
         self.tau_conf = tau_conf
         self.momentum = kwargs.get("beta", momentum)
+        self.tau_thresh = float(kwargs.get("tau_thresh", tau_thresh))
+        self.tau_temp = float(kwargs.get("tau_temp", tau_temp))
         # Initialize EMA running class presence means to 1.0
         self.register_buffer("mu", torch.ones(num_classes, dtype=torch.float32))
 
@@ -86,7 +96,10 @@ class CategoryMaskEngine(nn.Module):
         # Compute dynamic category filtering gamma_k
         # Class 0 (NO_PERSON) is always retained (gamma_0 = 1.0)
         gamma = torch.ones_like(self.mu, device=logits.device)
-        gamma[1:] = torch.where(self.mu[1:] >= (self.mu[1:].max() * 0.10), 1.0, 0.0)
+        # Soft continuous sigmoidal gating: sigma((mu_k - tau_thresh) / tau_temp)
+        # Prevents hard step extinction of minority target activities
+        scaled = (self.mu[1:] - self.tau_thresh) / max(self.tau_temp, 1e-4)
+        gamma[1:] = torch.sigmoid(scaled)
         return gamma, max_act_probs.mean()
 
     @torch.no_grad()
@@ -119,9 +132,11 @@ class CategoryMaskEngine(nn.Module):
 
         gamma = torch.ones_like(self.mu, device=probs.device)
         if self.num_classes == 7:
-            gamma[1:] = torch.where(self.mu[1:] >= (self.mu[1:].max() * 0.10), 1.0, 0.0)
+            scaled = (self.mu[1:] - self.tau_thresh) / max(self.tau_temp, 1e-4)
+            gamma[1:] = torch.sigmoid(scaled)
         else:
-            gamma = torch.where(self.mu >= (self.mu.max() * 0.10), 1.0, 0.0)
+            scaled = (self.mu - self.tau_thresh) / max(self.tau_temp, 1e-4)
+            gamma = torch.sigmoid(scaled)
         return gamma
 
 

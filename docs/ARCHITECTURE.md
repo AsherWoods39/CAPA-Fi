@@ -249,7 +249,8 @@ Class occurrences:   counts_k = bincount(pred_k | I = True)
 Normalized freq:     freq_k   = counts_k / (Σ I + ε)
 EMA smoothing:       μ_k      ← β · μ_k + (1-β) · freq_k   (for k = 0..K)
 Dynamic filtering:   γ_0      = 1.0  (Class 0 / NO_PERSON always retained)
-                     γ_k      = I[μ_k ≥ 0.10 · max_{j≥1}(μ_j)]  (for k = 1..K)
+                     γ_k      = σ((μ_k − τ_thresh) / τ_temp)  (for k = 1..K)
+                     (Soft continuous sigmoidal gating prevents permanent extinction of minority classes)
 ```
 
 #### 3b. Loss Engine (`src/adaptation/loss_engine.py`)
@@ -261,11 +262,12 @@ p̃_{i,m,k} = (p_{i,m,k} · γ_k) / (Σ_j p_{i,m,j} · γ_j + ε)
 L_ent     = − (1/BM) Σ_i Σ_m Σ_k  p̃_{i,m,k} · log(p̃_{i,m,k} + ε)
 ```
 
-**Marginal Diversity Loss `L_div`** (maximised → prevents collapsed uniform predictions)
+**Active-Category Marginal Diversity Loss `L_div`** (maximised → prevents class collapse without penalizing absent classes)
 
 ```
-p̂_k   = mean_{i,m} p_{i,m,k}                        (batch marginal distribution)
-L_div  = p̄_occ · Σ_k  p̂_k · log(p̂_k + ε)            (negative entropy)
+p̂_k   = mean_{i,m} p̃_{i,m,k}                        (active-class batch marginal distribution)
+p̂_act = p̂_{k ∈ active} / Σ_{j ∈ active} p̂_j          (normalized over active classes where γ_k > 0.05)
+L_div  = p̄_occ · Σ_{k ∈ active}  p̂_act,k · log(p̂_act,k + ε) (negative entropy over active categories)
 ```
 
 **Rotation SSL Loss `L_rot`**

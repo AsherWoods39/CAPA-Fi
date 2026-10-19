@@ -294,7 +294,7 @@ Saves best checkpoint to `checkpoints/source_model.pt`.
 - **Non-Background Confidence**: Computes confidence $w_{i,m} = \max_{k \ge 1} p_{i,m,k}$ specifically across human activity classes ($1..6$), excluding Class 0 (NO_PERSON). This prevents unconfident target slots from falsely reporting high confidence due to background collapse.
 - **Calibrated Gating ($\tau_{\text{conf}} = 0.15$)**: Samples with non-background confidence exceeding $0.15$ contribute to class occurrence statistics.
 - **EMA Tracking**: Updates running prevalence $\mu_k \leftarrow \beta \mu_k + (1-\beta) \text{freq}_k$ ($K+1=7$ classes).
-- **Dynamic Mask ($\gamma_k$)**: Class 0 is always retained ($\gamma_0 = 1.0$). Activity classes are filtered via $\gamma_k = \mathbb{I}(\mu_k \ge 0.10 \cdot \max_{j \ge 1} \mu_j)$, effectively zeroing out absent classes under partial domain shift.
+- **Dynamic Mask ($\gamma_k$)**: Class 0 is always retained ($\gamma_0 = 1.0$). Activity classes are filtered via continuous sigmoidal soft gating: $\gamma_k = \sigma((\mu_k - \tau_{\text{thresh}}) / \tau_{\text{temp}})$, preventing step discontinuities and permanent extinction of low-frequency active categories.
 
 **`compute_occupancy(probs)`** → `p_occ [B]`:
 - High `p_occ` = room is occupied ($1 - \text{mean}(p_{\text{NO\_PERSON}})$).
@@ -317,8 +317,8 @@ loss_dict = engine(
 ```
 
 **Loss Components**:
-1. **Category-Masked Conditional Entropy ($L_{\text{ent}}$)**: Masks out absent source categories ($\gamma_k = 0$) and re-normalizes slot probability distributions before computing entropy. This prevents negative transfer from forcing predictions into absent classes.
-2. **Marginal Diversity ($L_{\text{div}}$)**: Maximizes marginal entropy of batch-averaged predictions across all classes, gated by multi-user occupancy $p_{\text{occ}}$.
+1. **Category-Masked Conditional Entropy ($L_{\text{ent}}$)**: Masks out absent source categories ($\gamma_k \to 0$) and re-normalizes slot probability distributions before computing entropy. This prevents negative transfer from forcing predictions into absent classes.
+2. **Active-Category Marginal Diversity ($L_{\text{div}}$)**: Maximizes marginal entropy of batch-averaged predictions *specifically over the active classes* ($\gamma_k > 0.05$), gated by multi-user occupancy $p_{\text{occ}}$. This prevents diversity loss from fighting the category mask by forcing uniform probability onto absent categories.
 3. **Rotation Self-Supervised Loss ($L_{\text{rot}}$)**: Auxiliary cross-entropy on subcarrier frequency inversion pretext task ($0^\circ$ vs $180^\circ$).
 
 **Total Loss Formulation**:

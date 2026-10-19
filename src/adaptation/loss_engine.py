@@ -128,12 +128,26 @@ class CAPAFiLossEngine(nn.Module):
             masked_probs = probs * category_mask.unsqueeze(0).unsqueeze(0)
             masked_probs = masked_probs / (masked_probs.sum(dim=-1, keepdim=True) + 1e-8)
             slot_entropy = -torch.sum(masked_probs * torch.log(masked_probs + 1e-8), dim=-1)
+        else:
+            masked_probs = probs
 
         loss_ent = slot_entropy.mean()
 
         # 2. Diversity Loss (Marginal Entropy across batch and slots)
-        avg_probs = probs.mean(dim=(0, 1))  # [K+1]
-        loss_div = torch.sum(avg_probs * torch.log(avg_probs + 1e-8))  # Negative entropy
+        # For partial-set adaptation, diversity is maximized specifically over the active categories
+        if category_mask is not None:
+            active_mask = (category_mask > 0.05)
+            if active_mask.any():
+                avg_masked = masked_probs.mean(dim=(0, 1))
+                active_avg = avg_masked[active_mask]
+                active_avg = active_avg / (active_avg.sum() + 1e-8)
+                loss_div = torch.sum(active_avg * torch.log(active_avg + 1e-8))
+            else:
+                avg_probs = probs.mean(dim=(0, 1))
+                loss_div = torch.sum(avg_probs * torch.log(avg_probs + 1e-8))
+        else:
+            avg_probs = probs.mean(dim=(0, 1))  # [K+1]
+            loss_div = torch.sum(avg_probs * torch.log(avg_probs + 1e-8))  # Negative entropy
 
         if occupancy_weight is not None:
             loss_div = occupancy_weight.mean() * loss_div
