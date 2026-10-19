@@ -292,13 +292,19 @@ def train_source(
 
     if os.path.isfile(source_split_csv):
         logger.info(f"Loading source dataset from {source_split_csv}")
+        raw_dir = data_cfg.get("raw_data_dir", "data/raw/WiMANS")
+        proc_dir = data_cfg.get("processed_dir", "data/processed/WiMANS")
+        chosen_dir = proc_dir if (Path(proc_dir).exists() and len(list(Path(proc_dir).glob("*.npy"))) > 0) else raw_dir
+
         dataset = MultiUserCSIDatasetWithPreprocessing(
             annotation_file=source_split_csv,
-            data_dir=data_cfg.get("processed_dir", "data/processed/WiMANS"),
+            data_dir=chosen_dir,
             fixed_length=data_cfg.get("window_size_T", 3000),
             num_slots=model_cfg.get("max_users_M", 6),
             in_channels=data_cfg.get("channels_C", 3),
             subcarriers=data_cfg.get("subcarriers_S", 30),
+            auto_download=False,
+            strict=False,
         )
     else:
         logger.info("Using synthetic fallback SourceTrainingDataset")

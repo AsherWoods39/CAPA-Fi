@@ -114,29 +114,51 @@ class MultiUserCSIDatasetWithPreprocessing(Dataset):
         subcarriers: int = 30,
         auto_download: bool = True,
         transform=None,
+        strict: bool = False,
     ):
         self.annotation_file = annotation_file
         self.annotations = pd.read_csv(annotation_file)
 
-        # Resolve dataset target path (defaulting to data/raw/WiMANS or data/processed/WiMANS)
+        # Resolve dataset target path (seamlessly searching data/raw/WiMANS and data/processed/WiMANS)
+        raw_path = PROJECT_ROOT / "data" / "raw" / "WiMANS"
+        proc_path = PROJECT_ROOT / "data" / "processed" / "WiMANS"
+
         if data_dir is None:
-            data_dir = str(PROJECT_ROOT / "data" / "raw" / "WiMANS")
+            if raw_path.exists() and len(list(raw_path.glob("*.npy"))) > 0:
+                data_dir = str(raw_path)
+            elif proc_path.exists() and len(list(proc_path.glob("*.npy"))) > 0:
+                data_dir = str(proc_path)
+            else:
+                data_dir = str(raw_path)
 
         self.data_dir = Path(data_dir)
+        # If specified directory is empty, check alternative directory
+        if not self.data_dir.exists() or len(list(self.data_dir.glob("*.npy"))) == 0:
+            alt_dir = raw_path if "processed" in str(self.data_dir) else proc_path
+            if alt_dir.exists() and len(list(alt_dir.glob("*.npy"))) > 0:
+                self.data_dir = alt_dir
+
         self.fixed_length = fixed_length
         self.num_slots = num_slots
         self.in_channels = in_channels
         self.subcarriers = subcarriers
         self.transform = transform
+        self.strict = strict
 
-        # Trigger auto-download if dataset directory is missing or contains no .npy files
-        if auto_download and not os.environ.get("PYTEST_CURRENT_TEST"):
-            if not self.data_dir.exists() or len(list(self.data_dir.glob("*.npy"))) == 0:
+        npy_count = len(list(self.data_dir.glob("*.npy"))) if self.data_dir.exists() else 0
+        if npy_count > 0:
+            print(f"[Dataset] Found {npy_count} real .npy files in {self.data_dir}.")
+        else:
+            # Trigger auto-download if dataset directory is missing or contains no .npy files
+            if auto_download and not os.environ.get("PYTEST_CURRENT_TEST"):
                 print(f"[Dataset] Target directory {self.data_dir} empty or missing. Initiating download...")
                 try:
                     download_wimans_dataset(target_dir=self.data_dir)
+                    npy_count = len(list(self.data_dir.glob("*.npy")))
                 except Exception as e:
                     print(f"[Dataset] Auto-download failed or skipped ({e}). Falling back to synthetic generation.")
+            if npy_count == 0:
+                print(f"[Dataset] Warning: 0 .npy files in {self.data_dir}. Synthetic tensors will be used.")
 
     def __len__(self) -> int:
         return len(self.annotations)
@@ -180,6 +202,11 @@ class MultiUserCSIDatasetWithPreprocessing(Dataset):
             std = np.std(csi_tensor, axis=(1, 2), keepdims=True)
             csi_tensor = (csi_tensor - mean) / (std + 1e-5)
         else:
+            if self.strict:
+                raise FileNotFoundError(
+                    f"Sample '{sample_name}.npy' not found in {self.data_dir}. "
+                    f"Real data required under strict=True. Please download via 'python -m src.utils.download_data'."
+                )
             # Synthetic fallback when .npy files are not yet on disk
             csi_tensor = np.random.randn(
                 self.in_channels, self.fixed_length, self.subcarriers

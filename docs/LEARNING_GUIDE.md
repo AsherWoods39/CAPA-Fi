@@ -107,11 +107,20 @@ x, target_slots = dataset[0]
 **Preprocessing steps**:
 1. Load `.npy` file → shape `[T, Tx, Rx, S]`
 2. Pad or truncate time to exactly 3000 steps
-3. Flatten antennas: `[T, Tx, Rx, S] → [T, C, S]` where `C = Tx × Rx`
+3. Flatten antennas: `[T, Tx, Rx, S] → [T, C, S]` where `C = Tx × Rx` (truncated/padded to `C=3`)
 4. Transpose to `[C, T, S]`
-5. Normalize: subtract mean, divide by std (per channel)
+5. Normalize: subtract mean, divide by std (zero-mean unit-variance per sample)
 
-**Synthetic fallback**: If `.npy` files don't exist yet, returns random tensors so the rest of the pipeline can still be tested.
+**Data Resolution & Downloader (`src/utils/download_data.py`)**:
+- WiMANS raw CSI files (~49.3 GB) can be downloaded via:
+  ```bash
+  python -m src.utils.download_data --retries 50 --cleanup-cache
+  ```
+- **Auto-Resume**: Uses HTTP range requests to resume from existing progress if the connection drops.
+- **Zero-Copy NTFS Hard-Linking**: Populates `data/raw/WiMANS` using hard links on Windows without duplicating 50 GB.
+- **Directory Discovery**: `MultiUserCSIDatasetWithPreprocessing` automatically checks both `data/raw/WiMANS` and `data/processed/WiMANS`.
+- **Strict Mode (`strict=True`)**: Raises `FileNotFoundError` if `.npy` files are missing during real training, preventing silent training on random numbers.
+- **Synthetic fallback (`strict=False`)**: Used during unit testing (`tests/test_capa_fi.py`) so tests run offline in ~20 seconds without downloading 50 GB.
 
 ---
 
@@ -277,41 +286,43 @@ Saves best checkpoint to `checkpoints/source_model.pt`.
 
 ### 3.10 Confidence Masking — `src/adaptation/confidence_masking.py`
 
-**What it does**: Computes three key quantities that control the adaptation loss.
+**What it does**: Computes non-background sample confidence and maintains the dynamic Category Filtering Mask $\gamma_k$.
 
 **`compute_probs(logits)`** → softmax probabilities `[B, M, K+1]`
 
-**`compute_sample_confidence(probs)`** → `w_i [B]`
-- High `w_i` = model is confident about sample `i`
-- Computed as: `1 − (normalized entropy per slot, averaged over M slots)`
+**`CategoryMaskEngine.update_mask(logits)`** → `(γ, mean_confidence)`:
+- **Non-Background Confidence**: Computes confidence $w_{i,m} = \max_{k \ge 1} p_{i,m,k}$ specifically across human activity classes ($1..6$), excluding Class 0 (NO_PERSON). This prevents unconfident target slots from falsely reporting high confidence due to background collapse.
+- **Calibrated Gating ($\tau_{\text{conf}} = 0.15$)**: Samples with non-background confidence exceeding $0.15$ contribute to class occurrence statistics.
+- **EMA Tracking**: Updates running prevalence $\mu_k \leftarrow \beta \mu_k + (1-\beta) \text{freq}_k$ ($K+1=7$ classes).
+- **Dynamic Mask ($\gamma_k$)**: Class 0 is always retained ($\gamma_0 = 1.0$). Activity classes are filtered via $\gamma_k = \mathbb{I}(\mu_k \ge 0.10 \cdot \max_{j \ge 1} \mu_j)$, effectively zeroing out absent classes under partial domain shift.
 
-**`compute_occupancy(probs)`** → `p_occ [B]`
-- High `p_occ` = room is occupied
-- Computed as: `1 − (average probability of NO_PERSON class)`
-
-**`CategoryMaskEngine`** → `γ_k [K]`
-- EMA-tracked gate per activity class
-- Class with `μ_k` persistently near 0 → `γ_k` → 0 (class is absent, suppress it)
-- Class with `μ_k` persistently above threshold → `γ_k` → 1 (class is present)
+**`compute_occupancy(probs)`** → `p_occ [B]`:
+- High `p_occ` = room is occupied ($1 - \text{mean}(p_{\text{NO\_PERSON}})$).
 
 ---
 
 ### 3.11 Loss Engine — `src/adaptation/loss_engine.py`
 
-**What it does**: Combines the three adaptation losses into one scalar.
+**What it does**: Evaluates the unified CAPA-Fi unsupervised adaptation objective:
 
 ```python
-engine = CAPAFiLossEngine(lambda_ent=1.0, lambda_div=1.0, lambda_rot=0.5)
-loss_dict = engine(logits, rot_logits_0, rot_logits_180, w_i, gamma_k, p_occ)
-
-# loss_dict contains:
-# "loss_total", "loss_entropy", "loss_diversity", "loss_rotation",
-# "mean_confidence", "active_classes_count", "occupancy_factor"
+engine = CAPAFiLossEngine(lambda_ent=1.0, lambda_div=0.25, lambda_rot=0.30)
+loss_dict = engine(
+    logits=logits,
+    rot_logits=rot_logits,
+    rot_targets=rot_targets,
+    category_mask=gamma_k,
+    occupancy_weight=p_occ,
+)
 ```
 
-**Formula**: `L = λ_ent·L_ent − λ_div·L_div + λ_rot·L_rot`
+**Loss Components**:
+1. **Category-Masked Conditional Entropy ($L_{\text{ent}}$)**: Masks out absent source categories ($\gamma_k = 0$) and re-normalizes slot probability distributions before computing entropy. This prevents negative transfer from forcing predictions into absent classes.
+2. **Marginal Diversity ($L_{\text{div}}$)**: Maximizes marginal entropy of batch-averaged predictions across all classes, gated by multi-user occupancy $p_{\text{occ}}$.
+3. **Rotation Self-Supervised Loss ($L_{\text{rot}}$)**: Auxiliary cross-entropy on subcarrier frequency inversion pretext task ($0^\circ$ vs $180^\circ$).
 
-Note the **minus** sign on diversity — we want to **maximize** class diversity (minimize its negative).
+**Total Loss Formulation**:
+$$\mathcal{L} = \lambda_{\text{ent}} \mathcal{L}_{\text{ent}} + \lambda_{\text{div}} \mathcal{L}_{\text{div}} + \lambda_{\text{rot}} \mathcal{L}_{\text{rot}}$$
 
 ---
 

@@ -130,23 +130,39 @@ cd CAPA-Fi
 pip install -r requirements.txt
 ```
 
-### 5.2 Run Consolidated Test Suite
+### 5.2 WiMANS Dataset Download (Auto-Resume & Zero-Copy Hard Linking)
+The WiMANS dataset (~49.3 GB) is downloaded automatically via `kagglehub` with automatic resume on network drops and zero-copy NTFS hard links on Windows:
 ```bash
-# Execute all 77 unit & integration tests
+# Download and link dataset to data/raw/WiMANS (with up to 50 auto-retries on connection drops)
+python -m src.utils.download_data --retries 50
+
+# Optional: free up ~50 GB in ~/.cache/kagglehub after extracting:
+python -m src.utils.download_data --cleanup-cache
+```
+> **Real vs. Synthetic Streaming**:
+> - If `data/raw/WiMANS` contains `.npy` files, `MultiUserCSIDatasetWithPreprocessing` streams and normalizes real Wi-Fi CSI signals.
+> - If the dataset is not yet downloaded, the pipeline transparently falls back to synthetic streaming tensors (`strict=False`), enabling immediate offline testing and CI validation.
+
+### 5.3 Run Consolidated Test Suite
+```bash
+# Execute all 77 unit & integration tests (runs in ~20-40s using synthetic mocks)
 pytest tests/test_capa_fi.py -v
 ```
 
-### 5.3 Source Model Pre-Training (Supervised Hungarian Matching)
+### 5.4 Source Model Pre-Training (Supervised Hungarian Matching)
 ```bash
+# Trains source backbone + classifier head on source_split.csv
 python -m src.models.train_source --config configs/default_config.yaml
 ```
 
-### 5.4 Source-Free Target Adaptation (CAPA-Fi)
+### 5.5 Source-Free Target Adaptation (CAPA-Fi Engine)
 ```bash
+# Adapts backbone f_θ while keeping classifier g_θ bitwise frozen
 python -m src.adaptation.run_adaptation --config configs/default_config.yaml
 ```
+- Features **Non-Background Confidence Gating** ($\tau_{\text{conf}} = 0.15$) and **Category-Aware Dynamic Filtering ($\gamma_k$)** to prevent entropy minimization pathology and background class 0 collapse.
 
-### 5.5 Benchmark Evaluation & Publication Visualizer
+### 5.6 Benchmark Evaluation & Publication Visualizer
 ```bash
 # Evaluate on 75% partial category shift (Primary protocol)
 python -m src.evaluation.benchmark --protocol partial_75
@@ -158,6 +174,7 @@ python -m src.evaluation.benchmark --protocol partial_50
 python -m src.evaluation.benchmark --protocol closed_set
 ```
 * Generates `results/confusion_matrix_{protocol}.png`, `results/tsne_{protocol}.png`, `results/adaptation_loss_curves.png`, `results/benchmark_table_{protocol}.tex`, and `results/benchmark_{protocol}.json`.
+
 
 ---
 

@@ -64,33 +64,35 @@ def get_target_dataloader(config: dict) -> DataLoader:
     falling back to synthetic streaming dataset if raw .npy files are not yet present.
     """
     splits_csv = PROJECT_ROOT / "splits" / "target_split.csv"
-    data_dir = PROJECT_ROOT / "data" / "raw" / "WiMANS"
-    
-    # Check if real data directory and split file exist with valid .npy files
-    use_real_dataset = False
-    if splits_csv.exists() and data_dir.exists():
+    raw_dir = PROJECT_ROOT / "data" / "raw" / "WiMANS"
+    proc_dir = PROJECT_ROOT / "data" / "processed" / "WiMANS"
+    chosen_dir = proc_dir if (proc_dir.exists() and len(list(proc_dir.glob("*.npy"))) > 0) else raw_dir
+
+    npy_files = list(chosen_dir.glob("*.npy")) if chosen_dir.exists() else []
+    if splits_csv.exists() and len(npy_files) > 0:
         try:
             from src.dataset import MultiUserCSIDatasetWithPreprocessing
             ds = MultiUserCSIDatasetWithPreprocessing(
                 annotation_file=str(splits_csv),
-                data_dir=str(data_dir),
+                data_dir=str(chosen_dir),
                 fixed_length=config["time_steps"],
                 auto_download=False,
+                strict=True,
             )
-            if len(ds) > 0:
-                # Test read of first element to verify .npy availability
-                _ = ds[0]
-                loader = DataLoader(
-                    ds,
-                    batch_size=config.get("batch_size", 32),
-                    shuffle=True,
-                    num_workers=0,
-                    pin_memory=False
-                )
-                print(f"[Data Engine] Loaded real target dataset from {splits_csv} ({len(ds)} samples)")
-                return loader
+            loader = DataLoader(
+                ds,
+                batch_size=config.get("batch_size", 32),
+                shuffle=True,
+                num_workers=0,
+                pin_memory=False,
+            )
+            print(f"[Data Engine] Loaded real target dataset from {splits_csv} ({len(ds)} samples, {len(npy_files)} .npy files in {chosen_dir})")
+            return loader
         except Exception as e:
             print(f"[Data Engine] Real dataset fallback triggered ({e}). Using synthetic target CSI streaming.")
+    else:
+        print(f"[Data Engine] No .npy files found in {chosen_dir} (dataset not yet downloaded). Using synthetic target CSI streaming.")
+
 
     # Synthetic fallback: 64 samples for 2 full batches
     B_total = 64

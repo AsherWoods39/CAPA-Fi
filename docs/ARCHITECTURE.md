@@ -222,19 +222,18 @@ Composable pipeline of CSI-specific augmentations (all shape-preserving `[B,C,T,
 
 #### 3a. Confidence Masking (`src/adaptation/confidence_masking.py`)
 
-**Sample confidence weight `w_i`**
+**Non-Background Sample Confidence Weight `w_i`**
 
-Measures how certain the model is about sample `i` using normalized entropy:
+Measures how confident the model is about human activity classes ($1..K$), explicitly excluding Class 0 (NO_PERSON) to prevent background collapse:
 
 ```
-H(p_{i,m}) = − Σ_k p_{i,m,k} · log(p_{i,m,k})
-w_{i,m}    = 1 − H(p_{i,m}) / log(K+1)     ∈ [0, 1]
-w_i        = (1/M) Σ_m w_{i,m}             (mean over slots)
+w_{i,m} = max_{k \ge 1} p_{i,m,k}                   (max non-background probability)
+w_i     = (1/M) Σ_m w_{i,m}                         (mean across slots)
 ```
 
 **Occupancy factor `p_occ`**
 
-Estimates how many people are in the room based on the No-Person class probability:
+Estimates room occupancy based on background (No-Person) probability:
 
 ```
 p_occ_i = 1 − (1/M) Σ_m P(class=0 | slot m, sample i)
@@ -242,40 +241,45 @@ p_occ_i = 1 − (1/M) Σ_m P(class=0 | slot m, sample i)
 
 **Category Mask Engine `γ_k`**
 
-EMA-tracked estimate of which activity classes are present in the target domain:
+EMA-tracked estimate of which activity categories are present in the target domain, calibrated with $\tau_{\text{conf}} = 0.15$:
 
 ```
-p̄_k  = Σ_{i: w_i ≥ τ_conf} p_{i,·,k} / count(i: w_i ≥ τ_conf)   (confident evidence)
-μ_k  ← β · μ_k + (1-β) · p̄_k                                      (EMA smoothing)
-γ_k  = sigmoid((μ_k − τ_thresh) / τ_temp)                          (soft gate)
+Confident mask:      I_{i,m} = [w_{i,m} ≥ τ_conf]
+Class occurrences:   counts_k = bincount(pred_k | I = True)
+Normalized freq:     freq_k   = counts_k / (Σ I + ε)
+EMA smoothing:       μ_k      ← β · μ_k + (1-β) · freq_k   (for k = 0..K)
+Dynamic filtering:   γ_0      = 1.0  (Class 0 / NO_PERSON always retained)
+                     γ_k      = I[μ_k ≥ 0.10 · max_{j≥1}(μ_j)]  (for k = 1..K)
 ```
 
 #### 3b. Loss Engine (`src/adaptation/loss_engine.py`)
 
-**Weighted entropy loss `L_ent`** (minimised → model becomes more confident)
+**Category-Masked Conditional Entropy Loss `L_ent`** (minimised → sharp predictions on present classes)
 
 ```
-L_ent = − (1/BM) Σ_i Σ_m  w_i · Σ_k p_{i,m,k} · log(p_{i,m,k})
+p̃_{i,m,k} = (p_{i,m,k} · γ_k) / (Σ_j p_{i,m,j} · γ_j + ε)
+L_ent     = − (1/BM) Σ_i Σ_m Σ_k  p̃_{i,m,k} · log(p̃_{i,m,k} + ε)
 ```
 
-**Masked diversity loss `L_div`** (maximised → model avoids collapsed predictions)
+**Marginal Diversity Loss `L_div`** (maximised → prevents collapsed uniform predictions)
 
 ```
-p̂_k   = mean_{i,m} p_{i,m,k}                          (batch marginal)
-L_div  = p̄_occ · Σ_k  γ_k · p̂_k · log(p̂_k + ε)      (negative, so subtracted)
+p̂_k   = mean_{i,m} p_{i,m,k}                        (batch marginal distribution)
+L_div  = p̄_occ · Σ_k  p̂_k · log(p̂_k + ε)            (negative entropy)
 ```
 
-**Rotation SSL loss `L_rot`**
+**Rotation SSL Loss `L_rot`**
 
 ```
-L_rot = ½ [ CE(rot_logits_0, labels=0) + CE(rot_logits_180, labels=1) ]
+L_rot = CrossEntropy(rot_logits, rot_targets)       (0° vs. 180° subcarrier inversion)
 ```
 
-**Total adaptation loss**
+**Total CAPA-Fi Target Adaptation Objective**
 
 ```
-L = λ_ent · L_ent  −  λ_div · L_div  +  λ_rot · L_rot
+L = λ_ent · L_ent  +  λ_div · L_div  +  λ_rot · L_rot
 ```
+
 
 Parameters learned: **backbone `f_θ`** and **rotation head `h_ψ`**.
 Parameters frozen: **classifier `g_θ`** — weights must be bitwise invariant after adaptation.
