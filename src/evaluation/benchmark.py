@@ -567,21 +567,66 @@ def run_benchmark(
     else:
         valid_classes = [1, 2, 3, 4, 5, 6]  # closed_set
 
-    # 4. Synthesize test evaluation batch & targets
-    B = num_eval_samples
-    x_test = torch.randn(B, 3, 3000, 30)
+    # 4. Ingest evaluation data: Prefer real WiMANS target samples from splits/target_split.csv
+    splits_csv = Path("splits/target_split.csv")
+    raw_dir = Path("data/raw/WiMANS")
+    proc_dir = Path("data/processed/WiMANS")
+    chosen_dir = proc_dir if (proc_dir.exists() and len(list(proc_dir.glob("*.npy"))) > 0) else raw_dir
 
-    target_slots = torch.zeros(B, 6, dtype=torch.long)
-    for b in range(B):
-        num_users = np.random.randint(0, 4)
-        if num_users > 0:
-            acts = np.random.choice(valid_classes, size=num_users, replace=False)
-            for idx, a in enumerate(acts):
-                target_slots[b, idx] = int(a)
+    real_data_available = splits_csv.exists() and chosen_dir.exists() and len(list(chosen_dir.glob("*.npy"))) > 0
 
-    # 5. Forward Pass & Metric Computation
-    with torch.no_grad():
-        logits, latents = model(x_test)
+    if real_data_available:
+        try:
+            ds = MultiUserCSIDatasetWithPreprocessing(
+                annotation_file=str(splits_csv),
+                data_dir=str(chosen_dir),
+                fixed_length=3000,
+                auto_download=False,
+                strict=False,
+            )
+            eval_indices = []
+            for idx in range(len(ds)):
+                _, slots = ds[idx]
+                active_slots = slots[slots > 0].tolist()
+                if all(s in valid_classes for s in active_slots):
+                    eval_indices.append(idx)
+                if len(eval_indices) >= num_eval_samples:
+                    break
+
+            if len(eval_indices) > 0:
+                sub_ds = torch.utils.data.Subset(ds, eval_indices)
+                eval_loader = DataLoader(sub_ds, batch_size=min(32, len(eval_indices)), shuffle=False)
+                all_logits = []
+                all_targets = []
+                with torch.no_grad():
+                    for batch_x, batch_y in eval_loader:
+                        l, _ = model(batch_x)
+                        all_logits.append(l)
+                        all_targets.append(batch_y)
+                logits = torch.cat(all_logits, dim=0)
+                target_slots = torch.cat(all_targets, dim=0)
+                logger.info(f"Ingested {len(eval_indices)} REAL WiMANS target test samples from {chosen_dir}")
+            else:
+                real_data_available = False
+        except Exception as e:
+            logger.warning(f"Could not evaluate with real target dataset ({e}); using synthetic fallback.")
+            real_data_available = False
+
+    if not real_data_available:
+        # Fallback synthetic evaluation batch
+        B = num_eval_samples
+        x_test = torch.randn(B, 3, 3000, 30)
+        target_slots = torch.zeros(B, 6, dtype=torch.long)
+        for b in range(B):
+            num_users = np.random.randint(0, 4)
+            if num_users > 0:
+                acts = np.random.choice(valid_classes, size=num_users, replace=False)
+                for idx, a in enumerate(acts):
+                    target_slots[b, idx] = int(a)
+
+        # 5. Forward Pass & Metric Computation
+        with torch.no_grad():
+            logits, latents = model(x_test)
 
     metrics = evaluate_predictions(logits, target_slots, num_classes=7)
 

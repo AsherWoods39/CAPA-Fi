@@ -389,12 +389,11 @@ checkpoints/adapted_model.pt
 src/evaluation/benchmark.py (--protocol [closed_set | partial_75 | partial_50])
     │   ├─ match_slots_hungarian → optimal bipartite permutation alignment
     │   ├─ evaluate_predictions → Slot-Acc, Active-Acc, Macro-F1, Occ-MAE, Exact-Match
-    │   ├─ plot_confusion_matrix → results/confusion_matrix_{protocol}.png
-    │   ├─ plot_tsne_embeddings → results/tsne_{protocol}.png
-    │   ├─ plot_loss_curves → results/adaptation_loss_curves.png
-    │   └─ export_latex_table → results/benchmark_table_{protocol}.tex
+    │   ├─ format_terminal_table → renders comparative table directly in terminal
+    │   ├─ plot_benchmark_summary → unified 2x2 subplot figure in results/benchmark_{protocol}.png
+    │   └─ (optional) export_latex_table → results/benchmark_table_{protocol}.tex (--export-latex)
     ▼
-results/benchmark_{protocol}.json
+results/benchmark_{protocol}.json & results/benchmark_{protocol}.png
 ```
 
 ---

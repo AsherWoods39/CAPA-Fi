@@ -173,7 +173,13 @@ python -m src.evaluation.benchmark --protocol partial_50
 # Evaluate on closed-set domain shift (100% overlap)
 python -m src.evaluation.benchmark --protocol closed_set
 ```
-* Generates `results/confusion_matrix_{protocol}.png`, `results/tsne_{protocol}.png`, `results/adaptation_loss_curves.png`, `results/benchmark_table_{protocol}.tex`, and `results/benchmark_{protocol}.json`.
+* Displays the publication-ready comparative benchmark table directly in the terminal (comparing SHOT, WiFi-SFGADR, SAN, Partial-SFUDA, MU-SHOT-Fi, and CAPA-Fi).
+* Generates a single unified subplot figure `results/benchmark_{protocol}.png` containing:
+  1. Multi-Slot Activity Confusion Matrix Heatmap
+  2. Paradigm Performance Comparison Bar Chart (Slot-Acc, Active-Acc, Macro-F1)
+  3. Multi-User Occupancy Estimation MAE Comparison
+  4. Target Adaptation Convergence Telemetry / Support Distribution
+* Exports evaluation metrics JSON to `results/benchmark_{protocol}.json`.
 
 
 ---

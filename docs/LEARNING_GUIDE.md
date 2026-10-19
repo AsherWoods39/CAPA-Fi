@@ -403,10 +403,9 @@ python -m src.evaluation.benchmark --protocol partial_75 --samples 64
 - `partial_50`: Target has 3 of 6 classes (`Fall`, `Wave`, `Pick-up` absent).
 
 **Visualizations & Outputs Saved in `results/`**:
-- `confusion_matrix_{protocol}.png`: Normalized activity prediction heatmap.
-- `tsne_{protocol}.png`: 2D t-SNE projection of backbone feature space $z$.
-- `adaptation_loss_curves.png`: Multi-epoch convergence curves for entropy and diversity.
-- `benchmark_table_{protocol}.tex`: Automated LaTeX table comparing Source-Only vs. Naive SHOT vs. CAPA-Fi.
+- `benchmark_{protocol}.png`: Consolidated publication-ready figure containing 4 subplots (Confusion matrix heatmap, Paradigm comparison bar chart, Occupancy MAE comparison, Convergence loss curves & support distribution).
+- `benchmark_{protocol}.json`: Machine-readable telemetry metrics (Slot Acc, Active Acc, Macro F1, Occ MAE, Exact Match).
+- Comparison table is printed directly to the terminal stdout for immediate inspection without generating auxiliary LaTeX files.
 
 ---
 
@@ -531,12 +530,11 @@ Evaluates model performance across three partial domain shift regimes:
 * `--config <str>`: Path to YAML config file (default: `configs/default_config.yaml`).
 * `--samples <int>`: Number of evaluation samples (default: `64`).
 
-#### Generated Output Artifacts (Saved in `results/`):
+#### Output & Display:
+* **Terminal Display**: Prints formatted ASCII comparison table directly in terminal output (comparing SHOT, WiFi-SFGADR, SAN, Partial-SFUDA, MU-SHOT-Fi, and CAPA-Fi).
+* `results/benchmark_{protocol}.png`: Consolidated 2x2 subplot figure (Confusion Matrix, Paradigm Comparison, Occupancy MAE, Convergence/Support).
 * `results/benchmark_{protocol}.json`: Machine-readable telemetry metrics (Slot Acc, Active Acc, Macro F1, Occ MAE, Exact Match).
-* `results/confusion_matrix_{protocol}.png`: Normalized activity prediction heatmap.
-* `results/tsne_{protocol}.png`: 2D t-SNE manifold projections of the latent feature space $z$.
-* `results/adaptation_loss_curves.png`: Multi-epoch loss convergence telemetry.
-* `results/benchmark_table_{protocol}.tex`: Automated publication-ready LaTeX comparison table.
+* `--export-latex` (optional flag): If passed, exports `results/benchmark_table_{protocol}.tex`.
 
 #### Programmatic Usage in Python:
 ```python
