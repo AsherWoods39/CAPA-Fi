@@ -60,6 +60,9 @@ class CategoryMaskEngine(nn.Module):
 
     @torch.no_grad()
     def update_mask(self, logits: torch.Tensor):
+        if self.mu.device != logits.device:
+            self.mu = self.mu.to(logits.device)
+
         # logits shape: [B, M, K+1]
         probs = F.softmax(logits, dim=-1)  # [B, M, K+1]
 
@@ -82,7 +85,7 @@ class CategoryMaskEngine(nn.Module):
 
         # Compute dynamic category filtering gamma_k
         # Class 0 (NO_PERSON) is always retained (gamma_0 = 1.0)
-        gamma = torch.ones_like(self.mu)
+        gamma = torch.ones_like(self.mu, device=logits.device)
         gamma[1:] = torch.where(self.mu[1:] >= (self.mu[1:].max() * 0.10), 1.0, 0.0)
         return gamma, max_act_probs.mean()
 
@@ -96,6 +99,9 @@ class CategoryMaskEngine(nn.Module):
         """
         Backward-compatible method for callers passing probs or (probs, w_i).
         """
+        if self.mu.device != probs.device:
+            self.mu = self.mu.to(probs.device)
+
         threshold = tau_conf if tau_conf is not None else self.tau_conf
         act_probs = probs[:, :, 1:] if probs.shape[-1] > 1 else probs
         max_act_probs, pred_acts = act_probs.max(dim=-1)
@@ -111,7 +117,7 @@ class CategoryMaskEngine(nn.Module):
                 freqs = counts[:self.num_classes] / (confident_mask.sum().float() + 1e-8)
             self.mu = self.momentum * self.mu + (1.0 - self.momentum) * freqs.to(self.mu.device)
 
-        gamma = torch.ones_like(self.mu)
+        gamma = torch.ones_like(self.mu, device=probs.device)
         if self.num_classes == 7:
             gamma[1:] = torch.where(self.mu[1:] >= (self.mu[1:].max() * 0.10), 1.0, 0.0)
         else:

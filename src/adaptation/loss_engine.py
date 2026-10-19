@@ -108,6 +108,12 @@ class CAPAFiLossEngine(nn.Module):
         elif len(args) >= 1 and rot_targets is None:
             pass
 
+        # Ensure all incoming conditioning tensors match logits device
+        if category_mask is not None:
+            category_mask = category_mask.to(device=logits.device, dtype=probs.dtype)
+        if occupancy_weight is not None:
+            occupancy_weight = occupancy_weight.to(device=logits.device, dtype=probs.dtype)
+
         # 1. Slot Entropy Loss (masked by category mask if provided)
         log_probs = F.log_softmax(logits, dim=-1)
         slot_entropy = -torch.sum(probs * log_probs, dim=-1)  # [B, M]
@@ -115,7 +121,7 @@ class CAPAFiLossEngine(nn.Module):
         if category_mask is not None:
             # Align mask shape if passed as 6-class vector (activities only)
             if category_mask.shape[-1] == probs.shape[-1] - 1:
-                prefix = torch.ones(1, device=category_mask.device, dtype=category_mask.dtype)
+                prefix = torch.ones(1, device=logits.device, dtype=category_mask.dtype)
                 category_mask = torch.cat([prefix, category_mask], dim=-1)
 
             # Mask out absent classes during entropy calculation
@@ -134,7 +140,11 @@ class CAPAFiLossEngine(nn.Module):
 
         # 3. Self-Supervised Rotation Loss
         if rot_targets is not None:
-            loss_rot = F.cross_entropy(rot_logits, rot_targets)
+            if rot_logits is not None:
+                rot_targets = rot_targets.to(rot_logits.device)
+                loss_rot = F.cross_entropy(rot_logits, rot_targets).to(logits.device)
+            else:
+                loss_rot = torch.tensor(0.0, device=logits.device, requires_grad=True)
         else:
             loss_rot = torch.tensor(0.0, device=logits.device, requires_grad=True)
 

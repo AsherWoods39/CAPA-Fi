@@ -96,7 +96,7 @@ class TargetAdaptationTrainer:
             lambda_ent=float(config.get("lambda_ent", 1.0)),
             lambda_div=float(config.get("lambda_div", 0.5)),
             lambda_rot=lambda_rot,
-        )
+        ).to(self.device)
         
         # Masking engine (stateful)
         num_classes = int(config.get("total_classes", config.get("num_classes", 7)))
@@ -107,7 +107,7 @@ class TargetAdaptationTrainer:
             num_classes=num_classes,
             tau_conf=self.tau_conf,
             momentum=float(config.get("ema_decay_beta", config.get("momentum", 0.90))),
-        )
+        ).to(self.device)
         
         self.last_epoch_metrics: Dict[str, float] = {}
     

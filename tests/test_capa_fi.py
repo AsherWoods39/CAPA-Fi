@@ -569,6 +569,13 @@ class TestConfidenceMasking:
         assert gamma.shape == (6,)
         assert p_occ.shape == (32,)
 
+    def test_mask_engine_device_alignment(self):
+        engine = CategoryMaskEngine(num_classes=7)
+        logits = torch.randn(4, 2, 7)
+        gamma, conf = engine.update_mask(logits)
+        assert gamma.device == logits.device
+        assert engine.mu.device == logits.device
+
 
 # =============================================================================
 # MODULE 3 — Loss Engine
@@ -613,6 +620,24 @@ class TestCAPAFiLossEngine:
         r180 = torch.zeros(B, 2); r180[:, 1] = 10.0  # strongly predicts class 1
         loss = compute_rotation_loss(r0, r180)
         assert loss.item() < 0.1, f"Rotation loss too high: {loss.item():.4f}"
+
+    def test_device_consistency_handling(self, engine):
+        """CAPAFiLossEngine must cleanly align tensors on different devices/dtypes."""
+        logits = torch.randn(8, 2, 7)
+        rot_logits = torch.randn(16, 2)
+        rot_targets = torch.randint(0, 2, (16,))
+        category_mask = torch.ones(7, dtype=torch.float64)
+        occupancy_weight = torch.ones(8, dtype=torch.float32)
+
+        out = engine(
+            logits=logits,
+            rot_logits=rot_logits,
+            rot_targets=rot_targets,
+            category_mask=category_mask,
+            occupancy_weight=occupancy_weight,
+        )
+        assert "loss" in out
+        assert out["loss"].device == logits.device
 
 
 # =============================================================================
