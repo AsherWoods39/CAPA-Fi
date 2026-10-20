@@ -271,6 +271,11 @@ class TargetAdaptationTrainer:
         )
 
         for ep in range(1, total_epochs + 1):
+            if hasattr(self.mask_engine, "step_epoch"):
+                current_temp = self.mask_engine.step_epoch(ep, total_epochs)
+            else:
+                current_temp = getattr(self.mask_engine, "tau_temp", 0.04)
+
             epoch_loss = self.adapt_epoch(target_loader)
             scheduler.step()
             metrics = epoch_loss.metrics
@@ -290,6 +295,7 @@ class TargetAdaptationTrainer:
                     f"Rot: {metrics['loss_rotation']:.4f} | "
                     f"Conf: {metrics['mean_confidence']:.3f} | "
                     f"Active: {metrics['active_classes_count']:.1f} | "
+                    f"Temp: {current_temp:.3f} | "
                     f"LR: {current_lr:.2e}"
                 )
         

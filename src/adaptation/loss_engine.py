@@ -135,13 +135,20 @@ class CAPAFiLossEngine(nn.Module):
 
         # 2. Diversity Loss (Marginal Entropy across batch and slots)
         # For partial-set adaptation, diversity is maximized specifically over the active categories
+        # with inverse-frequency class weighting to prevent high-frequency classes from dominating.
         if category_mask is not None:
             active_mask = (category_mask > 0.05)
             if active_mask.any():
                 avg_masked = masked_probs.mean(dim=(0, 1))
                 active_avg = avg_masked[active_mask]
                 active_avg = active_avg / (active_avg.sum() + 1e-8)
-                loss_div = torch.sum(active_avg * torch.log(active_avg + 1e-8))
+
+                # Inverse-frequency class weighting: w_k \propto 1 / (p_k + delta)
+                delta = 0.05
+                inv_freq = 1.0 / (active_avg.detach() + delta)
+                w_k = inv_freq / (inv_freq.mean() + 1e-8)
+
+                loss_div = torch.sum(w_k * active_avg * torch.log(active_avg + 1e-8))
             else:
                 avg_probs = probs.mean(dim=(0, 1))
                 loss_div = torch.sum(avg_probs * torch.log(avg_probs + 1e-8))

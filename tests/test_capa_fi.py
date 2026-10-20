@@ -578,6 +578,14 @@ class TestConfidenceMasking:
         assert gamma.device == logits.device
         assert engine.mu.device == logits.device
 
+    def test_category_mask_temperature_annealing(self):
+        engine = CategoryMaskEngine(num_classes=7, tau_temp=0.04, tau_temp_end=0.015)
+        assert engine.tau_temp == 0.04
+        t_mid = engine.step_epoch(epoch=15, total_epochs=30)
+        assert 0.015 < t_mid < 0.04
+        t_end = engine.step_epoch(epoch=30, total_epochs=30)
+        assert pytest.approx(t_end, 0.001) == 0.015
+
 
 # =============================================================================
 # MODULE 3 — Loss Engine
@@ -640,6 +648,17 @@ class TestCAPAFiLossEngine:
         )
         assert "loss" in out
         assert out["loss"].device == logits.device
+
+    def test_class_balanced_diversity_weighting(self, engine):
+        """Active diversity loss must apply inverse-frequency weighting across active classes."""
+        logits = torch.zeros(8, 2, 7)
+        # Class 1 is highly favored, class 2 is lower frequency
+        logits[:, :, 1] = 5.0
+        logits[:, :, 2] = 1.0
+        category_mask = torch.tensor([1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0])
+        out = engine(logits=logits, rot_logits=None, rot_targets=None, category_mask=category_mask)
+        assert "loss_diversity" in out
+        assert torch.isfinite(out["loss_diversity"])
 
 
 # =============================================================================

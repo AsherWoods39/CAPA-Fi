@@ -554,10 +554,24 @@ def run_benchmark(
     if os.path.isfile(ckpt_path):
         logger.info(f"Loading evaluation checkpoint: {ckpt_path}")
         state = torch.load(ckpt_path, map_location="cpu", weights_only=False)
-        if isinstance(state, dict) and "state_dict" in state:
-            model.load_state_dict(state["state_dict"], strict=False)
-        elif isinstance(state, dict):
-            model.load_state_dict(state, strict=False)
+        if isinstance(state, dict):
+            if "backbone" in state and isinstance(state["backbone"], dict):
+                combined = {}
+                for prefix in ["backbone", "classifier", "rotation_head"]:
+                    if prefix in state and isinstance(state[prefix], dict):
+                        for k, v in state[prefix].items():
+                            combined[f"{prefix}.{k}"] = v
+                if "classifier" in state:
+                    for k, v in state["classifier"].items():
+                        combined[f"slot_head.{k}"] = v
+                if "rotation_head" in state:
+                    for k, v in state["rotation_head"].items():
+                        combined[f"rot_head.{k}"] = v
+                model.load_state_dict(combined, strict=False)
+            elif "state_dict" in state:
+                model.load_state_dict(state["state_dict"], strict=False)
+            else:
+                model.load_state_dict(state, strict=False)
 
     # 3. Protocol class setup
     if protocol == "partial_75":
@@ -584,14 +598,32 @@ def run_benchmark(
                 auto_download=False,
                 strict=False,
             )
+            # Fast in-memory filtering: match exact protocol activities without out-of-scope label noise
+            valid_activity_map = {
+                1: {"walk"},
+                2: {"sit", "sit_down"},
+                3: {"stand", "stand_up"},
+                4: {"fall", "lie_down"},
+                5: {"wave"},
+                6: {"pick_up", "pickup"},
+            }
+            allowed_strings = {"nothing", "none", "no_person"}
+            for cls in valid_classes:
+                allowed_strings.update(valid_activity_map.get(cls, set()))
+
+            act_cols = [c for c in ds.annotations.columns if "activity" in c]
             eval_indices = []
-            for idx in range(len(ds)):
-                _, slots = ds[idx]
-                active_slots = slots[slots > 0].tolist()
-                if all(s in valid_classes for s in active_slots):
+            for idx, row in ds.annotations.iterrows():
+                row_acts = {
+                    str(row[c]).strip().lower()
+                    for c in act_cols
+                    if pd.notna(row[c]) and str(row[c]).strip() != ""
+                }
+                sample_name = str(row["label"])
+                if row_acts.issubset(allowed_strings) and (ds.data_dir / f"{sample_name}.npy").exists():
                     eval_indices.append(idx)
-                if len(eval_indices) >= num_eval_samples:
-                    break
+                    if len(eval_indices) >= num_eval_samples:
+                        break
 
             if len(eval_indices) > 0:
                 sub_ds = torch.utils.data.Subset(ds, eval_indices)

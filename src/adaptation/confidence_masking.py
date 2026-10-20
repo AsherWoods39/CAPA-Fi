@@ -45,6 +45,8 @@ def compute_occupancy(probs: torch.Tensor) -> torch.Tensor:
     p_occ = 1.0 - p_bg.mean(dim=-1) # (B,)
     return p_occ
 
+import math
+import numpy as np
 import torch.nn as nn
 from typing import Optional
 
@@ -57,6 +59,7 @@ class CategoryMaskEngine(nn.Module):
         momentum: float = 0.9,
         tau_thresh: float = 0.05,
         tau_temp: float = 0.04,
+        tau_temp_end: float = 0.015,
         **kwargs,
     ):
         super().__init__()
@@ -65,8 +68,27 @@ class CategoryMaskEngine(nn.Module):
         self.momentum = kwargs.get("beta", momentum)
         self.tau_thresh = float(kwargs.get("tau_thresh", tau_thresh))
         self.tau_temp = float(kwargs.get("tau_temp", tau_temp))
+        self.tau_temp_start = float(kwargs.get("tau_temp_start", self.tau_temp))
+        self.tau_temp_end = float(kwargs.get("tau_temp_end", tau_temp_end))
         # Initialize EMA running class presence means to 1.0
         self.register_buffer("mu", torch.ones(num_classes, dtype=torch.float32))
+
+    def set_temperature(self, tau_temp: float) -> None:
+        """Manually overrides current sigmoid temperature."""
+        self.tau_temp = float(tau_temp)
+
+    def step_epoch(self, epoch: int, total_epochs: int) -> float:
+        """
+        Dynamically anneals sigmoid temperature tau_temp over training epochs
+        from tau_temp_start (0.04) down to tau_temp_end (0.015) using cosine decay.
+        Sharpening class selection as target predictions cluster and become confident.
+        """
+        if total_epochs <= 1:
+            return self.tau_temp
+        progress = float(epoch - 1) / float(max(1, total_epochs - 1))
+        cosine_decay = 0.5 * (1.0 + np.cos(np.pi * progress))
+        self.tau_temp = self.tau_temp_end + (self.tau_temp_start - self.tau_temp_end) * cosine_decay
+        return self.tau_temp
 
     @torch.no_grad()
     def update_mask(self, logits: torch.Tensor):
