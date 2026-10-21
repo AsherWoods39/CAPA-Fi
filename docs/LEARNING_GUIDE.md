@@ -230,7 +230,7 @@ loss = loss_fn(logits, target_slots)  # logits: [B,6,7], target: [B,6]
 **`SourceTrainingLoss`**: Combines matched CE with rotation loss for source training.
 
 ```python
-loss_fn = SourceTrainingLoss(lambda_rot_source=0.5)
+loss_fn = SourceTrainingLoss(lambda_rot_source=0.3)  # λ_rot_source = 0.3 from config
 losses = loss_fn(logits, target_slots, rot_logits, rot_labels)
 # Returns: {"total": ..., "matched_ce": ..., "rotation": ...}
 ```
@@ -273,11 +273,11 @@ python -m src.models.train_source --config configs/default_config.yaml
 **Per-epoch logic**:
 1. Load batch `(x, target_slots)`
 2. Augment: `x_aug = CSIAugmentor()(x)`
-3. Create rotation pair: `x_combined = cat([x_aug, flip(x_aug)])` → shape `[2B, 3, 3000, 30]`
+3. Create rotation pair: `x_combined = cat([x_aug, flip(x_aug, dims=[-1])])` → shape `[2B, 3, 3000, 30]` (subcarrier-axis inversion only)
 4. Forward: `logits_combined, z_combined = model(x_combined)`
 5. Split: `logits = logits_combined[:B]` (original samples only)
 6. Rotation head: `rot_logits = model.forward_rotation(z_combined)` (all 2B)
-7. Loss = `L_matched_CE + 0.5 × L_rotation`
+7. Loss = `L_matched_CE + 0.3 × L_rotation`  (λ_rot_source = 0.3 from config)
 8. Backward + AdamW + CosineAnnealing scheduler step
 
 Saves best checkpoint to `checkpoints/source_model.pt`.
@@ -576,27 +576,40 @@ Tests that require real CSV/NPY files are automatically skipped if the data is n
 x = torch.randn(4, 3, 3000, 30)   # 4 CSI samples
 
 # Source training forward:
-x_aug = CSIAugmentor()(x)                       # augment
-x_rot = torch.flip(x_aug, dims=[-2, -1])        # 180° flip
-x_combined = torch.cat([x_aug, x_rot], dim=0)  # [8, 3, 3000, 30]
+x_aug = CSIAugmentor()(x)                            # augment (jitter + scale + magnitude_warp)
+x_rot = torch.flip(x_aug, dims=[-1])                 # subcarrier-axis inversion ONLY (NOT [-2,-1])
+x_combined = torch.cat([x_aug, x_rot], dim=0)       # [8, 3, 3000, 30]
 
-logits_all, z_all = model(x_combined)           # backbone + classifier
-logits = logits_all[:4]                         # [4, 6, 7] -- original only
-rot_logits = model.forward_rotation(z_all)      # [8, 2] -- all samples
+logits_all, z_all = model(x_combined)                # backbone + classifier
+logits = logits_all[:4]                              # [4, 6, 7] -- original only
+rot_logits = model.forward_rotation(z_all)           # [8, 2] -- all 2B samples
 
-loss = SourceTrainingLoss(0.5)(logits, target_slots, rot_logits, rot_labels)
+loss = SourceTrainingLoss(lambda_rot_source=0.3)(logits, target_slots, rot_logits, rot_labels)
 loss["total"].backward()
 optimizer.step()
 
 # Adaptation forward (no labels):
-logits, z = model(x_target)                      # [B, 6, 7], [B, 256]
-x_freq_inv = torch.flip(x_target, dims=[-1])    # Subcarrier-only flip (NOT dims=[-2,-1])
-_, z_freq_inv = model(x_freq_inv)
-rot_0   = model.forward_rotation(z)             # [B, 2]
-rot_freq = model.forward_rotation(z_freq_inv)   # [B, 2]
+logits, z = model(x_target)                          # [B, 6, 7], [B, 256]
+x_target_180 = torch.flip(x_target, dims=[-1])       # subcarrier-axis inversion ONLY
+_, z_180 = model(x_target_180)
+rot_logits_0   = model.forward_rotation(z)           # [B, 2]
+rot_logits_180 = model.forward_rotation(z_180)       # [B, 2]
 
-w_i, gamma_k, p_occ = compute_weights_and_masks(logits, mask_engine)
-loss_dict = CAPAFiLossEngine()(logits, rot_0, rot_freq, w_i, gamma_k, p_occ)
+# Concatenate rotation pairs as used in TargetAdaptationTrainer.adapt_epoch()
+rot_logits = torch.cat([rot_logits_0, rot_logits_180], dim=0)  # [2B, 2]
+rot_targets = torch.cat([torch.zeros(B, dtype=torch.long),
+                          torch.ones(B, dtype=torch.long)])      # [2B]
+
+gamma_k, mean_conf = mask_engine.update_mask(logits)  # EMA category mask
+p_occ = compute_occupancy(compute_probs(logits))       # [B] occupancy
+
+loss_dict = CAPAFiLossEngine()(
+    logits=logits,
+    rot_logits=rot_logits,
+    rot_targets=rot_targets,
+    category_mask=gamma_k,
+    occupancy_weight=p_occ,
+)
 loss_dict["loss_total"].backward()
 optimizer.step()
 ```
