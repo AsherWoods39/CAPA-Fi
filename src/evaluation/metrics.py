@@ -47,9 +47,10 @@ def match_slots_hungarian(
     for b in range(B):
         # Cost matrix: cost(m, j) = -log P(slot m predicts target class j)
         target_b = target_cpu[b]  # [M]
-        # Gather predicted log-probabilities of target classes
-        eps = 1e-8
-        log_p = torch.log(probs_cpu[b] + eps)  # [M, K+1]
+        # Clamp probabilities to [1e-7, 1.0] to prevent -inf in log space
+        # (numerical underflow guard for cost matrix inversion stability)
+        probs_clamped = torch.clamp(probs_cpu[b], min=1e-7, max=1.0)  # [M, K+1]
+        log_p = torch.log(probs_clamped)  # [M, K+1]
         cost_matrix = -log_p[:, target_b].numpy()  # [M, M]
 
         row_ind, col_ind = linear_sum_assignment(cost_matrix)

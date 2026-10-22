@@ -535,6 +535,68 @@ def run_benchmark(
     """
     logger.info(f"Running benchmark evaluation under protocol: {protocol}")
 
+    # -----------------------------------------------------------------------
+    # Fix 1: Verify adaptation completed fully before running benchmark
+    # -----------------------------------------------------------------------
+    ckpt_path = model_checkpoint or "checkpoints/adapted_model.pt"
+    ckpt_file = Path(ckpt_path)
+
+    # (a) Assert checkpoint file exists and is non-empty (not a partial write)
+    if not ckpt_file.is_file() or ckpt_file.stat().st_size == 0:
+        raise RuntimeError(
+            f"[Benchmark] Checkpoint not found or is empty: '{ckpt_path}'\n"
+            "  → Run the adaptation pipeline first (python -m src.adaptation.run_adaptation)\n"
+            "    and confirm it prints: [SUCCESS] Adaptation completed successfully!"
+        )
+
+    # (b) Scan adaptation log for the success sentinel emitted by run_adaptation.py
+    #     The sentinel line is: "[SUCCESS] Adaptation completed successfully!"
+    #     We look for it in results/adaptation_history.json (presence = trainer saved
+    #     telemetry, which only happens after a full run) and optionally in a
+    #     side-car log file written by the runner.
+    adaptation_history_path = Path("results/adaptation_history.json")
+    adaptation_log_path = Path("results/adaptation_run.log")  # optional side-car log
+
+    success_confirmed = False
+
+    # Check side-car log file first (most reliable sentinel source)
+    if adaptation_log_path.is_file():
+        try:
+            log_text = adaptation_log_path.read_text(encoding="utf-8", errors="ignore")
+            if "[SUCCESS] Adaptation completed successfully!" in log_text:
+                success_confirmed = True
+                logger.info(
+                    "[Benchmark] Adaptation success sentinel confirmed in adaptation_run.log."
+                )
+        except OSError:
+            pass
+
+    # Fallback: if adaptation_history.json exists and has loss entries the full
+    # loop ran to completion (trainer only writes it at the very end).
+    if not success_confirmed and adaptation_history_path.is_file():
+        try:
+            with open(adaptation_history_path, "r") as _f:
+                _hist = json.load(_f)
+            if _hist.get("loss_total") and len(_hist["loss_total"]) > 0:
+                success_confirmed = True
+                logger.info(
+                    "[Benchmark] Adaptation history JSON found with loss entries — "
+                    "treating as proxy for completed adaptation."
+                )
+        except Exception:
+            pass
+
+    if not success_confirmed:
+        raise RuntimeError(
+            "[Benchmark] Cannot confirm that adaptation completed successfully.\n"
+            "  Expected either:\n"
+            "    (a) 'results/adaptation_run.log' containing the line:\n"
+            "        [SUCCESS] Adaptation completed successfully!\n"
+            "    (b) 'results/adaptation_history.json' with non-empty loss_total entries.\n"
+            "  → Re-run: python -m src.adaptation.run_adaptation"
+        )
+    # -----------------------------------------------------------------------
+
     # 1. Build Model
     model = HARModel(
         in_channels=3,
@@ -549,29 +611,28 @@ def run_benchmark(
     )
     model.eval()
 
-    # 2. Load Checkpoint if available
-    ckpt_path = model_checkpoint or "checkpoints/adapted_model.pt"
-    if os.path.isfile(ckpt_path):
-        logger.info(f"Loading evaluation checkpoint: {ckpt_path}")
-        state = torch.load(ckpt_path, map_location="cpu", weights_only=False)
-        if isinstance(state, dict):
-            if "backbone" in state and isinstance(state["backbone"], dict):
-                combined = {}
-                for prefix in ["backbone", "classifier", "rotation_head"]:
-                    if prefix in state and isinstance(state[prefix], dict):
-                        for k, v in state[prefix].items():
-                            combined[f"{prefix}.{k}"] = v
-                if "classifier" in state:
-                    for k, v in state["classifier"].items():
-                        combined[f"slot_head.{k}"] = v
-                if "rotation_head" in state:
-                    for k, v in state["rotation_head"].items():
-                        combined[f"rot_head.{k}"] = v
-                model.load_state_dict(combined, strict=False)
-            elif "state_dict" in state:
-                model.load_state_dict(state["state_dict"], strict=False)
-            else:
-                model.load_state_dict(state, strict=False)
+    # 2. Load Checkpoint (existence already verified by pre-flight guard above)
+    logger.info(f"Loading evaluation checkpoint: {ckpt_path}")
+    state = torch.load(str(ckpt_file), map_location="cpu", weights_only=False)
+    if isinstance(state, dict):
+        if "backbone" in state and isinstance(state["backbone"], dict):
+            combined = {}
+            for prefix in ["backbone", "classifier", "rotation_head"]:
+                if prefix in state and isinstance(state[prefix], dict):
+                    for k, v in state[prefix].items():
+                        combined[f"{prefix}.{k}"] = v
+            if "classifier" in state:
+                for k, v in state["classifier"].items():
+                    combined[f"slot_head.{k}"] = v
+            if "rotation_head" in state:
+                for k, v in state["rotation_head"].items():
+                    combined[f"rot_head.{k}"] = v
+            model.load_state_dict(combined, strict=False)
+        elif "state_dict" in state:
+            model.load_state_dict(state["state_dict"], strict=False)
+        else:
+            model.load_state_dict(state, strict=False)
+
 
     # 3. Protocol class setup
     if protocol == "partial_75":

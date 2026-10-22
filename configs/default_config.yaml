@@ -84,7 +84,7 @@ adaptation:
   freeze_classifier: true # Strictly enforces requires_grad = False on g_θ
   epochs: 30
   batch_size: 32
-  learning_rate_backbone: 2.0e-5 # Updated: Lower LR protects pre-trained backbone representations
+  learning_rate_backbone: 2.0e-5 # Fix 3: Conservative LR (2e-5) — prevents class-presence weight collapse during early epochs
   weight_decay: 1.0e-4
   optimizer: "AdamW"
 
