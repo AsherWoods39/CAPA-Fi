@@ -70,8 +70,11 @@ class CategoryMaskEngine(nn.Module):
         self.tau_temp = float(kwargs.get("tau_temp", tau_temp))
         self.tau_temp_start = float(kwargs.get("tau_temp_start", self.tau_temp))
         self.tau_temp_end = float(kwargs.get("tau_temp_end", tau_temp_end))
-        # Initialize EMA running class presence means to 1.0
-        self.register_buffer("mu", torch.ones(num_classes, dtype=torch.float32))
+        # Initialize EMA running class presence means to uniform activity prior
+        # Activity classes 1..K start at 1/(K), background class 0 starts at 1.0
+        initial_mu = torch.full((num_classes,), 1.0 / max(1, num_classes - 1), dtype=torch.float32)
+        initial_mu[0] = 1.0
+        self.register_buffer("mu", initial_mu)
 
     def set_temperature(self, tau_temp: float) -> None:
         """Manually overrides current sigmoid temperature."""

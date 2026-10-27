@@ -84,14 +84,14 @@ adaptation:
   freeze_classifier: true # Strictly enforces requires_grad = False on g_θ
   epochs: 30
   batch_size: 32
-  learning_rate_backbone: 2.0e-5 # Fix 3: Conservative LR (2e-5) — prevents class-presence weight collapse during early epochs
+  learning_rate_backbone: 5.0e-6 # Conservative LR (5e-6) prevents backbone collapse & feature overwriting
   weight_decay: 1.0e-4
   optimizer: "AdamW"
 
   # Loss Formulation Hyperparameters
   lambda_ent: 1.0 # Conditional entropy weight (promotes sharp predictions)
-  lambda_div: 0.25 # Updated: Moderated diversity weight to prevent forced uniform predictions
-  lambda_rot: 0.30 # Updated: Auxiliary rotation SSL weight
+  lambda_div: 0.05 # Lower diversity weight to prevent forced uniform collapse
+  lambda_rot: 0.30 # Auxiliary rotation SSL weight
   grad_clip_norm: 1.0 # Max gradient L2 norm for backbone + rot_head (0 = disabled)
 
   # Multi-User Occupancy Gating
@@ -99,8 +99,8 @@ adaptation:
 
   # Category-Aware Dynamic Filtering Mask (γ_k)
   enable_category_filtering: true # Novel CAPA-Fi negative-transfer mitigation
-  tau_conf: 0.15 # Updated: Lower confidence threshold enables early pseudo-evidence updates
-  tau_thresh: 0.05 # Updated: Marginal presence cutoff threshold
+  tau_conf: 0.15 # Lower confidence threshold enables early pseudo-evidence updates
+  tau_thresh: 0.08 # Increased presence threshold to correctly filter absent classes (gamma_k = 0)
   tau_temp: 0.04 # Sigmoidal mask temperature parameter
   ema_decay_beta: 0.90 # Exponential moving average smoothing factor
 

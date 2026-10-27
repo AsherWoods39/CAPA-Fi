@@ -78,6 +78,7 @@ class CAPAFiLossEngine(nn.Module):
         rot_targets: Optional[torch.Tensor] = None,
         category_mask: Optional[torch.Tensor] = None,
         occupancy_weight: Optional[torch.Tensor] = None,
+        confidence_weight: Optional[torch.Tensor] = None,
         *args,
         **kwargs,
     ):
@@ -131,6 +132,12 @@ class CAPAFiLossEngine(nn.Module):
         else:
             masked_probs = probs
 
+        if confidence_weight is not None:
+            confidence_weight = confidence_weight.to(device=logits.device, dtype=probs.dtype)
+            if confidence_weight.ndim == 1 and confidence_weight.shape[0] == probs.shape[0]:
+                slot_entropy = slot_entropy * confidence_weight.unsqueeze(-1)
+            else:
+                raise ValueError("confidence_weight must have shape [batch]")
         loss_ent = slot_entropy.mean()
 
         # 2. Diversity Loss (Marginal Entropy across batch and slots)

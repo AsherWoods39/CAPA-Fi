@@ -89,9 +89,11 @@ class TargetAdaptationTrainer:
         self.enable_occupancy = bool(
             config.get("enable_occupancy_weighting", self.method in ["capa_fi", "mu_shot_fi"])
         )
+        self.enable_confidence_weighting = bool(config.get("enable_confidence_weighting", True))
+        self.enable_rotation_loss = bool(config.get("enable_rotation_loss", True))
         
         # Loss engine
-        lambda_rot = 0.0 if self.method == "shot" else float(config.get("lambda_rot", 0.5))
+        lambda_rot = 0.0 if self.method == "shot" or not self.enable_rotation_loss else float(config.get("lambda_rot", 0.5))
         self.loss_engine = CAPAFiLossEngine(
             lambda_ent=float(config.get("lambda_ent", 1.0)),
             lambda_div=float(config.get("lambda_div", 0.5)),
@@ -193,6 +195,7 @@ class TargetAdaptationTrainer:
                 rot_targets=rot_targets,
                 category_mask=gamma_k,
                 occupancy_weight=p_occ if self.enable_occupancy else None,
+                confidence_weight=w_i if self.enable_confidence_weighting else None,
             )
             
             total_loss_val = loss_dict.get("loss_total", loss_dict["loss"])

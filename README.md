@@ -225,6 +225,8 @@ python -m src.evaluation.benchmark --protocol partial_75 --checkpoint checkpoint
 # Other protocols:
 python -m src.evaluation.benchmark --protocol closed_set
 python -m src.evaluation.benchmark --protocol partial_50
+python -m src.evaluation.benchmark --all-protocols
+python -m src.evaluation.benchmark --all-protocols --run-ablation
 
 # Export LaTeX table (optional):
 python -m src.evaluation.benchmark --protocol partial_75 --export-latex
